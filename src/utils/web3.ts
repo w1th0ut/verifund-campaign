@@ -4,7 +4,7 @@ import CampaignABI from '@/contracts/Campaign.json';
 
 declare global {
   interface Window {
-    ethereum?: any;
+    ethereum?: ethers.Eip1193Provider;
   }
 }
 
@@ -124,82 +124,77 @@ export class Web3Service {
 
   // Fungsi untuk donate
   async donateToCampaign(campaignAddress: string, amount: string): Promise<string> {
-  if (!this.signer) {
-    throw new Error('Wallet not connected');
-  }
+    if (!this.signer) {
+      throw new Error('Wallet not connected');
+    }
 
-  const userAddress = await this.signer.getAddress();
-  const idrxTokenAddress = process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!;
-  
-  // Dapatkan decimals dari contract
-  const tokenContract = new ethers.Contract(
-    idrxTokenAddress, 
-    [
-      "function approve(address spender, uint256 amount) external returns (bool)",
-      "function allowance(address owner, address spender) external view returns (uint256)",
-      "function decimals() external view returns (uint8)",
-      "function balanceOf(address owner) external view returns (uint256)"
-    ], 
-    this.signer
-  );
-
-  const decimals = await tokenContract.decimals();
-  const amountInUnits = ethers.parseUnits(amount, decimals); // Gunakan parseUnits dengan decimals yang benar
-
-  // 1. Periksa saldo IDRX
-  const balance = await tokenContract.balanceOf(userAddress);
-  const balanceFormatted = ethers.formatUnits(balance, decimals);
-  
-  if (parseFloat(balanceFormatted) < parseFloat(amount)) {
-    throw new Error(`Insufficient IDRX balance. You have ${balanceFormatted} IDRX, need ${amount} IDRX`);
-  }
-
-  // 2. Periksa saldo LSK untuk gas
-  const gasBalance = await this.checkGasBalance(userAddress);
-  console.log('ETH LISK Sepolia Balance:', gasBalance);
-  if (parseFloat(gasBalance) < 0.00001) {
-    throw new Error(`Insufficient LSK for gas. You need at least 0.001 LSK for transaction fees`);
-  }
-
-  try {
-    const currentAllowance = await tokenContract.allowance(userAddress, campaignAddress);
+    const userAddress = await this.signer.getAddress();
+    const idrxTokenAddress = process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!;
     
-    // Jika allowance sudah cukup, skip approve
-    if (currentAllowance >= amountInUnits) {
-      console.log('Sufficient allowance already exists, skipping approve');
-    } else {
-      // Reset allowance ke 0 dulu jika ada allowance sebelumnya
-      if (currentAllowance > 0) {
-        console.log('Resetting existing allowance to 0');
-        const resetTx = await tokenContract.approve(campaignAddress, 0);
-        await resetTx.wait();
+    const tokenContract = new ethers.Contract(
+      idrxTokenAddress, 
+      [
+        "function approve(address spender, uint256 amount) external returns (bool)",
+        "function allowance(address owner, address spender) external view returns (uint256)",
+        "function decimals() external view returns (uint8)",
+        "function balanceOf(address owner) external view returns (uint256)"
+      ], 
+      this.signer
+    );
+
+    const decimals = await tokenContract.decimals();
+    const amountInUnits = ethers.parseUnits(amount, decimals);
+
+    const balance = await tokenContract.balanceOf(userAddress);
+    const balanceFormatted = ethers.formatUnits(balance, decimals);
+    
+    if (parseFloat(balanceFormatted) < parseFloat(amount)) {
+      throw new Error(`Insufficient IDRX balance. You have ${balanceFormatted} IDRX, need ${amount} IDRX`);
+    }
+
+    const gasBalance = await this.checkGasBalance(userAddress);
+    console.log('ETH LISK Sepolia Balance:', gasBalance);
+    if (parseFloat(gasBalance) < 0.001) {
+      throw new Error(`Insufficient LSK for gas. You need at least 0.001 LSK for transaction fees`);
+    }
+
+    try {
+      const currentAllowance = await tokenContract.allowance(userAddress, campaignAddress);
+      
+      if (currentAllowance >= amountInUnits) {
+        console.log('Sufficient allowance already exists, skipping approve');
+      } else {
+        if (currentAllowance > 0) {
+          console.log('Resetting existing allowance to 0');
+          const resetTx = await tokenContract.approve(campaignAddress, 0);
+          await resetTx.wait();
+        }
+
+        console.log('Approving tokens...');
+        const approveTx = await tokenContract.approve(campaignAddress, amountInUnits);
+        await approveTx.wait();
+        console.log('Tokens approved successfully');
       }
 
-      // Approve jumlah yang dibutuhkan
-      console.log('Approving tokens...');
-      const approveTx = await tokenContract.approve(campaignAddress, amountInUnits);
-      await approveTx.wait();
-      console.log('Tokens approved successfully');
-    }
+      const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, this.signer);
+      const donateTx = await campaign.donate(amountInUnits);
+      const receipt = await donateTx.wait();
 
-    // 4. Lakukan donasi
-    const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, this.signer);
-    const donateTx = await campaign.donate(amountInUnits);
-    const receipt = await donateTx.wait();
-
-    return receipt.hash;
-  } catch (error: any) {
-    console.error('Detailed error:', error);
-    
-    if (error.code === 'INSUFFICIENT_FUNDS') {
-      throw new Error('Insufficient funds for gas fees. Please add more LSK to your wallet.');
-    } else if (error.reason) {
-      throw new Error(`Transaction failed: ${error.reason}`);
-    } else {
-      throw new Error(`Transaction failed: ${error.message}`);
+      return receipt.hash;
+    } catch (error: unknown) {
+      console.error('Detailed error:', error);
+      
+      const err = error as { code?: string; reason?: string; message?: string };
+      
+      if (err.code === 'INSUFFICIENT_FUNDS') {
+        throw new Error('Insufficient funds for gas fees. Please add more LSK to your wallet.');
+      } else if (err.reason) {
+        throw new Error(`Transaction failed: ${err.reason}`);
+      } else {
+        throw new Error(`Transaction failed: ${err.message || 'Unknown error'}`);
+      }
     }
   }
-}
 
   // Fungsi untuk withdraw (owner only)
   async withdrawFromCampaign(campaignAddress: string): Promise<string> {

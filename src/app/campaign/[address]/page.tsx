@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { web3Service } from '@/utils/web3';
 import { getMetadataFromIPFS, CampaignMetadata } from '@/utils/ipfs';
 
@@ -29,17 +30,8 @@ export default function CampaignDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  useEffect(() => {
-    loadCampaignDetails();
-  }, [campaignAddress]);
-
-  useEffect(() => {
-    if (userWallet && campaign) {
-      loadUserDonation();
-    }
-  }, [userWallet, campaign]);
-
-  const loadCampaignDetails = async () => {
+  // Wrap functions dengan useCallback untuk fix dependency warning
+  const loadCampaignDetails = useCallback(async () => {
     try {
       const details = await web3Service.getCampaignDetails(campaignAddress);
       setCampaign(details);
@@ -53,23 +45,35 @@ export default function CampaignDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [campaignAddress]);
 
-  const loadUserDonation = async () => {
+  const loadUserDonation = useCallback(async () => {
+    if (!userWallet || !campaign) return;
+    
     try {
       const donation = await web3Service.getUserDonation(campaignAddress, userWallet);
       setUserDonation(donation);
     } catch (error) {
       console.error('Error loading user donation:', error);
     }
-  };
+  }, [campaignAddress, userWallet, campaign]);
+
+  useEffect(() => {
+    loadCampaignDetails();
+  }, [loadCampaignDetails]);
+
+  useEffect(() => {
+    if (userWallet && campaign) {
+      loadUserDonation();
+    }
+  }, [loadUserDonation, userWallet, campaign]);
 
   const connectWallet = async () => {
     try {
       const address = await web3Service.connectWallet();
       setUserWallet(address);
     } catch (error) {
-      alert('Failed to connect wallet: ' + (error as Error).message);
+      alert('Failed to connect wallet: ' + (error as unknown as Error).message);
     }
   };
 
@@ -92,7 +96,7 @@ export default function CampaignDetailPage() {
       await loadCampaignDetails();
       await loadUserDonation();
     } catch (error) {
-      alert('Error saat donasi: ' + (error as Error).message);
+      alert('Error saat donasi: ' + (error as unknown as Error).message);
     } finally {
       setIsProcessing(false);
     }
@@ -110,7 +114,7 @@ export default function CampaignDetailPage() {
       alert(`Withdraw berhasil! Transaction hash: ${txHash}`);
       await loadCampaignDetails();
     } catch (error) {
-      alert('Error saat withdraw: ' + (error as Error).message);
+      alert('Error saat withdraw: ' + (error as unknown as Error).message);
     } finally {
       setIsProcessing(false);
     }
@@ -129,7 +133,7 @@ export default function CampaignDetailPage() {
       await loadCampaignDetails();
       await loadUserDonation();
     } catch (error) {
-      alert('Error saat refund: ' + (error as Error).message);
+      alert('Error saat refund: ' + (error as unknown as Error).message);
     } finally {
       setIsProcessing(false);
     }
@@ -169,10 +173,7 @@ export default function CampaignDetailPage() {
   const hasDonated = parseFloat(userDonation) > 0;
   const progressPercentage = campaign ? Math.min((parseFloat(campaign.raised) / parseFloat(campaign.target)) * 100, 100) : 0;
 
-  // Kondisi untuk withdraw: owner, campaign ended, target reached
   const canWithdraw = isOwner && campaign?.timeRemaining === 0 && campaign?.status === 1;
-  
-  // Kondisi untuk refund: donor, campaign ended, target not reached
   const canRefund = hasDonated && campaign?.timeRemaining === 0 && campaign?.status === 2;
 
   if (isLoading) {
@@ -206,14 +207,17 @@ export default function CampaignDetailPage() {
           </svg>
           <span className="font-medium">Kembali ke Home</span>
         </button>
+
         {/* Header */}
         <div className="bg-white rounded-lg shadow-md overflow-hidden mb-6">
           {metadata?.image && (
-            <div className="h-64 w-full overflow-hidden">
-              <img
+            <div className="h-64 w-full overflow-hidden relative">
+              <Image
                 src={metadata.image}
                 alt={campaign.name}
-                className="w-full h-full object-cover"
+                fill
+                className="object-cover"
+                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
               />
             </div>
           )}
@@ -261,7 +265,6 @@ export default function CampaignDetailPage() {
               </div>
             </div>
 
-            {/* Campaign Details */}
             <div className="bg-white rounded-lg shadow-md p-6">
               <h2 className="text-xl font-semibold mb-4">Detail Kampanye</h2>
               <div className="grid grid-cols-2 gap-4 text-sm">
@@ -295,7 +298,6 @@ export default function CampaignDetailPage() {
 
           {/* Sidebar */}
           <div className="lg:col-span-1">
-            {/* Progress Card */}
             <div className="bg-white rounded-lg shadow-md p-6 mb-6">
               <div className="text-center mb-4">
                 <div className="text-2xl font-bold text-gray-800 mb-1">
@@ -317,7 +319,6 @@ export default function CampaignDetailPage() {
                 {formatTimeRemaining(campaign.timeRemaining)} tersisa
               </div>
 
-              {/* User Donation Info */}
               {userWallet && (
                 <div className="bg-gray-50 rounded-lg p-4 mb-4">
                   <div className="text-sm text-gray-600 mb-1">Donasi Anda:</div>
@@ -325,7 +326,6 @@ export default function CampaignDetailPage() {
                 </div>
               )}
 
-              {/* Connect Wallet Button */}
               {!userWallet && (
                 <button
                   onClick={connectWallet}
@@ -335,7 +335,6 @@ export default function CampaignDetailPage() {
                 </button>
               )}
 
-              {/* Donate Section */}
               {userWallet && campaign.status === 0 && !isOwner && (
                 <div className="mb-4">
                   <div className="mb-3">
@@ -359,7 +358,6 @@ export default function CampaignDetailPage() {
                 </div>
               )}
 
-              {/* Owner Actions */}
               {isOwner && (
                 <div className="space-y-3">
                   {canWithdraw && (
@@ -380,7 +378,6 @@ export default function CampaignDetailPage() {
                 </div>
               )}
 
-              {/* Donor Refund Actions */}
               {userWallet && !isOwner && (
                 <div className="space-y-3">
                   {canRefund && (

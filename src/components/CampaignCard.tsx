@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { getMetadataFromIPFS, CampaignMetadata } from '@/utils/ipfs';
 
 interface CampaignCardProps {
@@ -99,14 +100,16 @@ export default function CampaignCard({
     >
       {/* Campaign Image */}
       {metadata?.image && (
-        <div className="h-48 w-full overflow-hidden">
-          <img
+        <div className="h-48 w-full overflow-hidden relative">
+            <Image
             src={metadata.image}
             alt={name}
-            className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
-          />
+            fill
+            className="object-cover hover:scale-105 transition-transform duration-300"
+            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            />
         </div>
-      )}
+        )}
       
       <div className="p-6">
         {/* Status Badge */}
