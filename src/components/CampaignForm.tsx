@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useAccount, useDisconnect } from 'wagmi';
+import { useConnectModal } from '@xellar/kit';
 import { uploadToIPFS, uploadImageToIPFS } from '@/utils/ipfs';
 import { web3Service } from '@/utils/web3';
 
@@ -15,6 +17,13 @@ interface CampaignFormData {
 }
 
 export default function CampaignForm() {
+  // Wagmi hooks untuk wallet management
+  const { address, isConnected } = useAccount();
+  const { disconnect } = useDisconnect();
+  const { open } = useConnectModal();
+
+  const [isClient, setIsClient] = useState(false);
+
   const [formData, setFormData] = useState<CampaignFormData>({
     creatorName: '',
     name: '',
@@ -26,7 +35,10 @@ export default function CampaignForm() {
   });
   
   const [isLoading, setIsLoading] = useState(false);
-  const [walletAddress, setWalletAddress] = useState<string>('');
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -45,24 +57,23 @@ export default function CampaignForm() {
     }
   };
 
-  const connectWallet = async () => {
-    try {
-      const address = await web3Service.connectWallet();
-      setWalletAddress(address);
-    } catch (error) {
-      alert('Failed to connect wallet: ' + (error as Error).message);
-    }
+  // Fungsi untuk connect wallet menggunakan Xellar modal
+  const connectWallet = () => {
+    open();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Check wallet connection terlebih dahulu
+    if (!isConnected) {
+      connectWallet();
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      if (!walletAddress) {
-        await connectWallet();
-      }
-
       let imageUrl = '';
       if (formData.image) {
         imageUrl = await uploadImageToIPFS(formData.image);
@@ -99,32 +110,82 @@ export default function CampaignForm() {
       });
       
     } catch (error) {
+      console.error('Error creating campaign:', error);
       alert('Error creating campaign: ' + (error as Error).message);
     } finally {
       setIsLoading(false);
     }
   };
 
+  if (!isClient) {
+    return (
+      <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md">
+        <h2 className="text-2xl font-bold mb-6 text-center">Buat Kampanye Baru</h2>
+        
+        {/* Loading state yang konsisten dengan server */}
+        <div className="mb-6 text-center">
+          <button 
+            disabled 
+            className="bg-gray-400 text-white font-bold py-2 px-4 rounded cursor-not-allowed"
+          >
+            Loading...
+          </button>
+          <p className="text-sm text-gray-600 mt-2">
+            Memuat status wallet...
+          </p>
+        </div>
+
+        {/* Form skeleton */}
+        <div className="space-y-4 opacity-50">
+          <div className="h-16 bg-gray-100 rounded"></div>
+          <div className="h-16 bg-gray-100 rounded"></div>
+          <div className="h-16 bg-gray-100 rounded"></div>
+          <div className="h-24 bg-gray-100 rounded"></div>
+          <div className="h-32 bg-gray-100 rounded"></div>
+          <div className="h-16 bg-gray-100 rounded"></div>
+          <div className="h-16 bg-gray-100 rounded"></div>
+          <div className="h-12 bg-gray-100 rounded"></div>
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ FIX: Client-side rendering yang konsisten
   return (
     <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md">
       <h2 className="text-2xl font-bold mb-6 text-center">Buat Kampanye Baru</h2>
       
-      {!walletAddress && (
+      {/* ✅ FIX: Wallet Connection Section - sekarang konsisten */}
+      {!isConnected ? (
         <div className="mb-6 text-center">
           <button
             onClick={connectWallet}
-            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors"
           >
             Connect Wallet
           </button>
-        </div>
-      )}
-
-      {walletAddress && (
-        <div className="mb-4 p-3 bg-green-100 rounded">
-          <p className="text-sm text-green-800">
-            Connected: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+          <p className="text-sm text-gray-600 mt-2">
+            Hubungkan wallet Anda untuk membuat kampanye
           </p>
+        </div>
+      ) : (
+        <div className="mb-4 p-3 bg-green-100 rounded-lg">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-green-800 font-medium">
+                ✅ Wallet Connected
+              </p>
+              <p className="text-xs text-green-600">
+                {address?.slice(0, 6)}...{address?.slice(-4)}
+              </p>
+            </div>
+            <button
+              onClick={() => disconnect()}
+              className="text-xs text-red-600 hover:text-red-800 underline"
+            >
+              Disconnect
+            </button>
+          </div>
         </div>
       )}
 
@@ -139,6 +200,7 @@ export default function CampaignForm() {
             value={formData.creatorName}
             onChange={handleInputChange}
             required
+            placeholder="Masukkan nama Anda"
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -153,6 +215,7 @@ export default function CampaignForm() {
             value={formData.name}
             onChange={handleInputChange}
             required
+            placeholder="Judul yang menarik untuk kampanye Anda"
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -187,6 +250,9 @@ export default function CampaignForm() {
             onChange={handleImageChange}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
+          <p className="text-xs text-gray-500 mt-1">
+            Upload gambar yang menarik untuk kampanye Anda (opsional)
+          </p>
         </div>
 
         <div>
@@ -199,6 +265,7 @@ export default function CampaignForm() {
             onChange={handleInputChange}
             required
             rows={4}
+            placeholder="Ceritakan detail kampanye Anda..."
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -213,10 +280,14 @@ export default function CampaignForm() {
             value={formData.targetAmount}
             onChange={handleInputChange}
             required
-            min="0"
+            min="1"
             step="0.01"
+            placeholder="Contoh: 1000000"
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
+          <p className="text-xs text-gray-500 mt-1">
+            Masukkan jumlah dana yang ingin Anda kumpulkan
+          </p>
         </div>
 
         <div>
@@ -233,15 +304,34 @@ export default function CampaignForm() {
             max="365"
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
+          <p className="text-xs text-gray-500 mt-1">
+            Berapa hari kampanye akan berjalan (maksimal 365 hari)
+          </p>
         </div>
 
         <button
           type="submit"
-          disabled={isLoading || !walletAddress}
-          className="w-full bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={isLoading || !isConnected}
+          className="w-full bg-blue-500 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {isLoading ? 'Membuat Kampanye...' : 'Buat Kampanye'}
+          {isLoading ? (
+            <div className="flex items-center justify-center">
+              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Membuat Kampanye...
+            </div>
+          ) : (
+            'Buat Kampanye'
+          )}
         </button>
+
+        {!isConnected && (
+          <p className="text-center text-sm text-gray-500 mt-2">
+            Hubungkan wallet terlebih dahulu untuk membuat kampanye
+          </p>
+        )}
       </form>
     </div>
   );

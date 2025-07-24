@@ -1,138 +1,126 @@
 import { ethers } from 'ethers';
+import { getWalletClient, getAccount, getPublicClient } from '@wagmi/core';
+import { config } from '@/app/providers';
+import { walletClientToSigner } from '@/utils/ethers';
 import CampaignFactoryABI from '@/contracts/CampaignFactory.json';
 import CampaignABI from '@/contracts/Campaign.json';
 import VerifundSBTABI from '@/contracts/VerifundSBT.json';
 
-declare global {
-  interface Window {
-    ethereum?: ethers.Eip1193Provider;
-  }
-}
-
 export class Web3Service {
-  private provider: ethers.BrowserProvider | null = null;
-  private signer: ethers.Signer | null = null;
+  private rpcProvider: ethers.JsonRpcProvider;
 
-  async connectWallet(): Promise<string> {
-    if (typeof window.ethereum === 'undefined') {
-      throw new Error('MetaMask is not installed');
+  constructor() {
+    this.rpcProvider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL!);
+  }
+
+  // Helper untuk mendapatkan signer dari Wagmi
+  private async getSigner(): Promise<ethers.Signer> {
+    const walletClient = await getWalletClient(config);
+    if (!walletClient) {
+      throw new Error('Wallet not connected');
     }
+    return walletClientToSigner(walletClient);
+  }
 
-    this.provider = new ethers.BrowserProvider(window.ethereum);
-    await this.provider.send('eth_requestAccounts', []);
-    this.signer = await this.provider.getSigner();
-    
-    return await this.signer.getAddress();
+  // Helper untuk mendapatkan address yang terhubung
+  private async getConnectedAddress(): Promise<string> {
+    const account = getAccount(config);
+    if (!account.address) {
+      throw new Error('Wallet not connected');
+    }
+    return account.address;
+  }
+
+  // Helper untuk format IDRX dengan decimals yang benar
+  private async formatIDRX(amount: bigint): Promise<string> {
+    const tokenContract = new ethers.Contract(
+      process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!,
+      ["function decimals() external view returns (uint8)"],
+      this.rpcProvider
+    );
+    const decimals = await tokenContract.decimals();
+    return ethers.formatUnits(amount, decimals);
+  }
+
+  // Helper untuk parse IDRX dengan decimals yang benar
+  private async parseIDRX(amount: string): Promise<bigint> {
+    const tokenContract = new ethers.Contract(
+      process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!,
+      ["function decimals() external view returns (uint8)"],
+      this.rpcProvider
+    );
+    const decimals = await tokenContract.decimals();
+    return ethers.parseUnits(amount, decimals);
   }
 
   async createCampaign(
-  name: string,
-  targetAmount: string,
-  durationInDays: number,
-  ipfsHash: string
-): Promise<string> {
-  if (!this.signer) {
-    throw new Error('Wallet not connected');
+    name: string,
+    targetAmount: string,
+    durationInDays: number,
+    ipfsHash: string
+  ): Promise<string> {
+    const signer = await this.getSigner();
+    const factoryAddress = process.env.NEXT_PUBLIC_CAMPAIGN_FACTORY_ADDRESS!;
+    const factory = new ethers.Contract(factoryAddress, CampaignFactoryABI.abi, signer);
+
+    const targetAmountInUnits = await this.parseIDRX(targetAmount);
+    
+    const tx = await factory.createCampaign(name, targetAmountInUnits, durationInDays, ipfsHash);
+    const receipt = await tx.wait();
+    
+    return receipt.hash;
   }
 
-  const factoryAddress = process.env.NEXT_PUBLIC_CAMPAIGN_FACTORY_ADDRESS!;
-  const factory = new ethers.Contract(factoryAddress, CampaignFactoryABI.abi, this.signer);
-
-  const idrxTokenAddress = process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!;
-  const tokenContract = new ethers.Contract(
-    idrxTokenAddress,
-    ["function decimals() external view returns (uint8)"],
-    this.signer
-  );
-  
-  const decimals = await tokenContract.decimals();
-  const targetAmountInUnits = ethers.parseUnits(targetAmount, decimals);
-  
-  const tx = await factory.createCampaign(name, targetAmountInUnits, durationInDays, ipfsHash);
-  const receipt = await tx.wait();
-  
-  return receipt.hash;
-}
-
-
   async getAllCampaigns(): Promise<string[]> {
-    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
     const factoryAddress = process.env.NEXT_PUBLIC_CAMPAIGN_FACTORY_ADDRESS!;
-    const factory = new ethers.Contract(factoryAddress, CampaignFactoryABI.abi, provider);
+    const factory = new ethers.Contract(factoryAddress, CampaignFactoryABI.abi, this.rpcProvider);
     
     return await factory.getDeployedCampaigns();
   }
 
   async getCampaignInfo(campaignAddress: string) {
-  const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
-  const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, provider);
-  
-  const idrxTokenAddress = process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!;
-  const tokenContract = new ethers.Contract(
-    idrxTokenAddress,
-    ["function decimals() external view returns (uint8)"],
-    provider
-  );
-  
-  const [info, decimals] = await Promise.all([
-    campaign.getCampaignInfo(),
-    tokenContract.decimals()
-  ]);
+    const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, this.rpcProvider);
+    const info = await campaign.getCampaignInfo();
 
-  const isOwnerVerified = await this.checkVerificationStatus(info[0]);
+    const isOwnerVerified = await this.checkVerificationStatus(info[0]);
 
-  return {
-    owner: info[0],
-    name: info[1],
-    target: ethers.formatUnits(info[2], decimals),
-    raised: ethers.formatUnits(info[3], decimals),
-    timeRemaining: Number(info[4]),
-    status: Number(info[5]),
-    isOwnerVerified
-  };
-}
+    return {
+      owner: info[0],
+      name: info[1],
+      target: await this.formatIDRX(info[2]),
+      raised: await this.formatIDRX(info[3]),
+      timeRemaining: Number(info[4]),
+      status: Number(info[5]),
+      isOwnerVerified
+    };
+  }
 
-  // Fungsi untuk mendapatkan detail lengkap termasuk metadata
   async getCampaignDetails(campaignAddress: string) {
-  const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
-  const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, provider);
-  
-  const idrxTokenAddress = process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!;
-  const tokenContract = new ethers.Contract(
-    idrxTokenAddress,
-    ["function decimals() external view returns (uint8)"],
-    provider
-  );
-  
-  const [info, ipfsHash, decimals] = await Promise.all([
-    campaign.getCampaignInfo(),
-    campaign.ipfsHash(),
-    tokenContract.decimals()
-  ]);
+    const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, this.rpcProvider);
+    
+    const [info, ipfsHash] = await Promise.all([
+      campaign.getCampaignInfo(),
+      campaign.ipfsHash()
+    ]);
 
-  const isOwnerVerified = await this.checkVerificationStatus(info[0]);
+    const isOwnerVerified = await this.checkVerificationStatus(info[0]);
 
-  return {
-    address: campaignAddress,
-    owner: info[0],
-    name: info[1],
-    target: ethers.formatUnits(info[2], decimals),
-    raised: ethers.formatUnits(info[3], decimals),
-    timeRemaining: Number(info[4]),
-    status: Number(info[5]),
-    ipfsHash,
-    isOwnerVerified
-  };
-}
+    return {
+      address: campaignAddress,
+      owner: info[0],
+      name: info[1],
+      target: await this.formatIDRX(info[2]),
+      raised: await this.formatIDRX(info[3]),
+      timeRemaining: Number(info[4]),
+      status: Number(info[5]),
+      ipfsHash,
+      isOwnerVerified
+    };
+  }
 
-
-  // Fungsi untuk donate
   async donateToCampaign(campaignAddress: string, amount: string): Promise<string> {
-    if (!this.signer) {
-      throw new Error('Wallet not connected');
-    }
-
-    const userAddress = await this.signer.getAddress();
+    const signer = await this.getSigner();
+    const userAddress = await this.getConnectedAddress();
     const idrxTokenAddress = process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!;
     
     const tokenContract = new ethers.Contract(
@@ -143,23 +131,23 @@ export class Web3Service {
         "function decimals() external view returns (uint8)",
         "function balanceOf(address owner) external view returns (uint256)"
       ], 
-      this.signer
+      signer
     );
 
-    const decimals = await tokenContract.decimals();
-    const amountInUnits = ethers.parseUnits(amount, decimals);
+    const amountInUnits = await this.parseIDRX(amount);
 
+    // Check IDRX balance
     const balance = await tokenContract.balanceOf(userAddress);
-    const balanceFormatted = ethers.formatUnits(balance, decimals);
+    const balanceFormatted = await this.formatIDRX(balance);
     
     if (parseFloat(balanceFormatted) < parseFloat(amount)) {
       throw new Error(`Insufficient IDRX balance. You have ${balanceFormatted} IDRX, need ${amount} IDRX`);
     }
 
+    // Check gas balance
     const gasBalance = await this.checkGasBalance(userAddress);
-    console.log('ETH LISK Sepolia Balance:', gasBalance);
     if (parseFloat(gasBalance) < 0.00001) {
-      throw new Error(`Insufficient ETH LISK SEPOLIA for gas. You need at least 0.00001 LSK for transaction fees`);
+      throw new Error(`Insufficient LSK for gas. You need at least 0.00001 LSK for transaction fees`);
     }
 
     try {
@@ -168,19 +156,22 @@ export class Web3Service {
       if (currentAllowance >= amountInUnits) {
         console.log('Sufficient allowance already exists, skipping approve');
       } else {
+        // Reset allowance if exists
         if (currentAllowance > 0) {
           console.log('Resetting existing allowance to 0');
           const resetTx = await tokenContract.approve(campaignAddress, 0);
           await resetTx.wait();
         }
 
+        // Approve tokens
         console.log('Approving tokens...');
         const approveTx = await tokenContract.approve(campaignAddress, amountInUnits);
         await approveTx.wait();
         console.log('Tokens approved successfully');
       }
 
-      const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, this.signer);
+      // Execute donation
+      const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, signer);
       const donateTx = await campaign.donate(amountInUnits);
       const receipt = await donateTx.wait();
 
@@ -200,87 +191,50 @@ export class Web3Service {
     }
   }
 
-  // Fungsi untuk withdraw (owner only)
   async withdrawFromCampaign(campaignAddress: string): Promise<string> {
-    if (!this.signer) {
-      throw new Error('Wallet not connected');
-    }
-
-    const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, this.signer);
+    const signer = await this.getSigner();
+    const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, signer);
     const tx = await campaign.withdraw();
     const receipt = await tx.wait();
-
     return receipt.hash;
   }
 
-  // Fungsi untuk refund (donor only)
   async refundFromCampaign(campaignAddress: string): Promise<string> {
-    if (!this.signer) {
-      throw new Error('Wallet not connected');
-    }
-
-    const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, this.signer);
+    const signer = await this.getSigner();
+    const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, signer);
     const tx = await campaign.refund();
     const receipt = await tx.wait();
-
     return receipt.hash;
   }
 
-  // Fungsi untuk cek donasi user
   async getUserDonation(campaignAddress: string, userAddress: string): Promise<string> {
-    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
-    const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, provider);
-    
-    // Dapatkan decimals untuk format yang benar
-    const idrxTokenAddress = process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!;
-    const tokenContract = new ethers.Contract(
-        idrxTokenAddress,
-        ["function decimals() external view returns (uint8)"],
-        provider
-    );
-    
-    const [donation, decimals] = await Promise.all([
-        campaign.donations(userAddress),
-        tokenContract.decimals()
-    ]);
-    
-    return ethers.formatUnits(donation, decimals);
-    }
+    const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, this.rpcProvider);
+    const donation = await campaign.donations(userAddress);
+    return await this.formatIDRX(donation);
+  }
 
   async checkTokenBalance(walletAddress: string): Promise<string> {
-    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
     const tokenContract = new ethers.Contract(
-        process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!,
-        [
-        "function balanceOf(address owner) external view returns (uint256)",
-        "function decimals() external view returns (uint8)"
-        ],
-        provider
+      process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!,
+      ["function balanceOf(address owner) external view returns (uint256)"],
+      this.rpcProvider
     );
     
-    const [balance, decimals] = await Promise.all([
-        tokenContract.balanceOf(walletAddress),
-        tokenContract.decimals()
-    ]);
-    
-    // Gunakan formatUnits dengan decimals yang benar
-    return ethers.formatUnits(balance, decimals);
-    }
+    const balance = await tokenContract.balanceOf(walletAddress);
+    return await this.formatIDRX(balance);
+  }
 
-    async checkGasBalance(walletAddress: string): Promise<string> {
-    const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
-    const balance = await provider.getBalance(walletAddress);
+  async checkGasBalance(walletAddress: string): Promise<string> {
+    const balance = await this.rpcProvider.getBalance(walletAddress);
     return ethers.formatEther(balance);
-    }
+  }
 
-    // Fungsi untuk check apakah address terverifikasi
   async checkVerificationStatus(userAddress: string): Promise<boolean> {
     try {
-      const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
       const sbtContract = new ethers.Contract(
         process.env.NEXT_PUBLIC_VERIFUND_SBT_ADDRESS!,
         VerifundSBTABI.abi,
-        provider
+        this.rpcProvider
       );
 
       const isVerified = await sbtContract.isVerified(userAddress);
@@ -291,7 +245,6 @@ export class Web3Service {
     }
   }
 
-  // Fungsi untuk mendapatkan info badge lengkap
   async getBadgeInfo(userAddress: string): Promise<{
     hasWhitelistPermission: boolean;
     isCurrentlyVerified: boolean;
@@ -299,11 +252,10 @@ export class Web3Service {
     metadataURI: string;
   }> {
     try {
-      const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
       const sbtContract = new ethers.Contract(
         process.env.NEXT_PUBLIC_VERIFUND_SBT_ADDRESS!,
         VerifundSBTABI.abi,
-        provider
+        this.rpcProvider
       );
 
       const badgeInfo = await sbtContract.getBadgeInfo(userAddress);
@@ -323,6 +275,18 @@ export class Web3Service {
         metadataURI: ''
       };
     }
+  }
+
+  // Utility function untuk check apakah wallet terhubung
+  isWalletConnected(): boolean {
+    const account = getAccount(config);
+    return account.isConnected;
+  }
+
+  // Utility function untuk mendapatkan address saat ini
+  getCurrentAddress(): string | undefined {
+    const account = getAccount(config);
+    return account.address;
   }
 }
 
