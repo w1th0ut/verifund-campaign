@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { web3Service } from '@/utils/web3';
 import { getMetadataFromIPFS, CampaignMetadata } from '@/utils/ipfs';
+import VerificationBadge from '@/components/VerificationBadge';
 
 interface CampaignDetails {
   address: string;
@@ -15,6 +16,7 @@ interface CampaignDetails {
   timeRemaining: number;
   status: number;
   ipfsHash: string;
+  isOwnerVerified: boolean;
 }
 
 export default function CampaignDetailPage() {
@@ -228,11 +230,15 @@ export default function CampaignDetailPage() {
                 {getStatusText(campaign.status)}
               </span>
               
-              {metadata?.category && (
-                <span className="text-sm bg-gray-100 text-gray-700 px-3 py-1 rounded-full">
-                  {metadata.category}
-                </span>
-              )}
+              <div className="flex items-center space-x-3">
+                {metadata?.category && (
+                  <span className="text-sm bg-gray-100 text-gray-700 px-3 py-1 rounded-full">
+                    {metadata.category}
+                  </span>
+                )}
+                {/* Verification Badge untuk Campaign Status */}
+                <VerificationBadge isVerified={campaign.isOwnerVerified} size="md" />
+              </div>
             </div>
 
             <h1 className="text-3xl font-bold text-gray-800 mb-4">{campaign.name}</h1>
@@ -245,6 +251,8 @@ export default function CampaignDetailPage() {
               </div>
               <span>oleh {metadata?.creatorName || `${campaign.owner.slice(0, 6)}...${campaign.owner.slice(-4)}`}</span>
               {isOwner && <span className="ml-2 text-blue-600 font-medium">(Anda)</span>}
+              {/* Verification Badge untuk Creator */}
+                <VerificationBadge isVerified={campaign.isOwnerVerified} size="sm" />
             </div>
           </div>
         </div>

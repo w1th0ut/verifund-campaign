@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { getMetadataFromIPFS, CampaignMetadata } from '@/utils/ipfs';
+import VerificationBadge from './VerificationBadge';
 
 interface CampaignCardProps {
   address: string;
@@ -14,6 +15,7 @@ interface CampaignCardProps {
   timeRemaining: number;
   status: number;
   ipfsHash: string;
+  isOwnerVerified: boolean;
 }
 
 export default function CampaignCard({ 
@@ -24,7 +26,8 @@ export default function CampaignCard({
   raised, 
   timeRemaining, 
   status, 
-  ipfsHash 
+  ipfsHash,
+  isOwnerVerified 
 }: CampaignCardProps) {
   const [metadata, setMetadata] = useState<CampaignMetadata | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -117,19 +120,26 @@ export default function CampaignCard({
           <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(status)}`}>
             {getStatusText(status)}
           </span>
+
+        {/* Verification Badge */}
+          <VerificationBadge isVerified={isOwnerVerified} size="sm" showText={false} />
         </div>
 
         {/* Campaign Title */}
         <h3 className="text-lg font-semibold mb-2 line-clamp-2">{name}</h3>
 
-        {/* Creator Info */}
+        {/* Creator Info dengan Verification Badge */}
         <div className="flex items-center mb-3 text-sm text-gray-600">
           <div className="w-6 h-6 bg-gray-300 rounded-full mr-2 flex items-center justify-center">
             <span className="text-xs font-medium">
               {metadata?.creatorName ? metadata.creatorName.charAt(0).toUpperCase() : owner.slice(2, 4).toUpperCase()}
             </span>
           </div>
-          <span>oleh {metadata?.creatorName || `${owner.slice(0, 6)}...${owner.slice(-4)}`}</span>
+          <div className="flex items-center space-x-2">
+            <span>oleh {metadata?.creatorName || `${owner.slice(0, 6)}...${owner.slice(-4)}`}</span>
+            {/* Verification Badge */}
+            <VerificationBadge isVerified={isOwnerVerified} size="sm" />
+          </div>
         </div>
 
         {/* Category */}

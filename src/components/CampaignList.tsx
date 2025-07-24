@@ -13,6 +13,7 @@ interface Campaign {
   timeRemaining: number;
   status: number;
   ipfsHash: string;
+  isOwnerVerified: boolean;
 }
 
 export default function CampaignList() {
@@ -76,6 +77,7 @@ export default function CampaignList() {
               timeRemaining={campaign.timeRemaining}
               status={campaign.status}
               ipfsHash={campaign.ipfsHash}
+              isOwnerVerified={campaign.isOwnerVerified}
             />
           ))}
         </div>

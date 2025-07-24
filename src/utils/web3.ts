@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import CampaignFactoryABI from '@/contracts/CampaignFactory.json';
 import CampaignABI from '@/contracts/Campaign.json';
+import VerifundSBTABI from '@/contracts/VerifundSBT.json';
 
 declare global {
   interface Window {
@@ -37,7 +38,6 @@ export class Web3Service {
   const factoryAddress = process.env.NEXT_PUBLIC_CAMPAIGN_FACTORY_ADDRESS!;
   const factory = new ethers.Contract(factoryAddress, CampaignFactoryABI.abi, this.signer);
 
-  // Dapatkan decimals dari IDRX token
   const idrxTokenAddress = process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!;
   const tokenContract = new ethers.Contract(
     idrxTokenAddress,
@@ -67,7 +67,6 @@ export class Web3Service {
   const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
   const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, provider);
   
-  // Dapatkan decimals untuk format yang benar
   const idrxTokenAddress = process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!;
   const tokenContract = new ethers.Contract(
     idrxTokenAddress,
@@ -80,13 +79,16 @@ export class Web3Service {
     tokenContract.decimals()
   ]);
 
+  const isOwnerVerified = await this.checkVerificationStatus(info[0]);
+
   return {
     owner: info[0],
     name: info[1],
-    target: ethers.formatUnits(info[2], decimals), // Format dengan decimals yang benar
-    raised: ethers.formatUnits(info[3], decimals), // Format dengan decimals yang benar
+    target: ethers.formatUnits(info[2], decimals),
+    raised: ethers.formatUnits(info[3], decimals),
     timeRemaining: Number(info[4]),
-    status: Number(info[5])
+    status: Number(info[5]),
+    isOwnerVerified
   };
 }
 
@@ -95,7 +97,6 @@ export class Web3Service {
   const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
   const campaign = new ethers.Contract(campaignAddress, CampaignABI.abi, provider);
   
-  // Dapatkan decimals dari IDRX token
   const idrxTokenAddress = process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!;
   const tokenContract = new ethers.Contract(
     idrxTokenAddress,
@@ -109,15 +110,18 @@ export class Web3Service {
     tokenContract.decimals()
   ]);
 
+  const isOwnerVerified = await this.checkVerificationStatus(info[0]);
+
   return {
     address: campaignAddress,
     owner: info[0],
     name: info[1],
-    target: ethers.formatUnits(info[2], decimals), // Gunakan decimals yang benar
-    raised: ethers.formatUnits(info[3], decimals), // Gunakan decimals yang benar
+    target: ethers.formatUnits(info[2], decimals),
+    raised: ethers.formatUnits(info[3], decimals),
     timeRemaining: Number(info[4]),
     status: Number(info[5]),
-    ipfsHash
+    ipfsHash,
+    isOwnerVerified
   };
 }
 
@@ -268,6 +272,58 @@ export class Web3Service {
     const balance = await provider.getBalance(walletAddress);
     return ethers.formatEther(balance);
     }
+
+    // Fungsi untuk check apakah address terverifikasi
+  async checkVerificationStatus(userAddress: string): Promise<boolean> {
+    try {
+      const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+      const sbtContract = new ethers.Contract(
+        process.env.NEXT_PUBLIC_VERIFUND_SBT_ADDRESS!,
+        VerifundSBTABI.abi,
+        provider
+      );
+
+      const isVerified = await sbtContract.isVerified(userAddress);
+      return isVerified;
+    } catch (error) {
+      console.error('Error checking verification status:', error);
+      return false;
+    }
+  }
+
+  // Fungsi untuk mendapatkan info badge lengkap
+  async getBadgeInfo(userAddress: string): Promise<{
+    hasWhitelistPermission: boolean;
+    isCurrentlyVerified: boolean;
+    tokenId: string;
+    metadataURI: string;
+  }> {
+    try {
+      const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
+      const sbtContract = new ethers.Contract(
+        process.env.NEXT_PUBLIC_VERIFUND_SBT_ADDRESS!,
+        VerifundSBTABI.abi,
+        provider
+      );
+
+      const badgeInfo = await sbtContract.getBadgeInfo(userAddress);
+      
+      return {
+        hasWhitelistPermission: badgeInfo[0],
+        isCurrentlyVerified: badgeInfo[1],
+        tokenId: badgeInfo[2].toString(),
+        metadataURI: badgeInfo[3]
+      };
+    } catch (error) {
+      console.error('Error getting badge info:', error);
+      return {
+        hasWhitelistPermission: false,
+        isCurrentlyVerified: false,
+        tokenId: '0',
+        metadataURI: ''
+      };
+    }
+  }
 }
 
 export const web3Service = new Web3Service();
