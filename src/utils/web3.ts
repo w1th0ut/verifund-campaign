@@ -154,8 +154,8 @@ export class Web3Service {
 
     const gasBalance = await this.checkGasBalance(userAddress);
     console.log('ETH LISK Sepolia Balance:', gasBalance);
-    if (parseFloat(gasBalance) < 0.001) {
-      throw new Error(`Insufficient LSK for gas. You need at least 0.001 LSK for transaction fees`);
+    if (parseFloat(gasBalance) < 0.00001) {
+      throw new Error(`Insufficient ETH LISK SEPOLIA for gas. You need at least 0.00001 LSK for transaction fees`);
     }
 
     try {
