@@ -8,6 +8,8 @@ import Image from 'next/image';
 import { web3Service } from '@/utils/web3';
 import { getMetadataFromIPFS, CampaignMetadata } from '@/utils/ipfs';
 import VerificationBadge from '@/components/VerificationBadge';
+import AllTransactionHistory from '@/components/AllTransactionHistory';
+import PaymentStatusChecker from '@/components/PaymentStatusChecker';
 
 interface CampaignDetails {
   address: string;
@@ -37,6 +39,11 @@ export default function CampaignDetailPage() {
   const [donateAmount, setDonateAmount] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // ✅ ADD: IDRX Payment States
+  const [showIDRXPayment, setShowIDRXPayment] = useState(false);
+  const [idrxPaymentLoading, setIDRXPaymentLoading] = useState(false);
+  const [donorEmail, setDonorEmail] = useState('');
 
   // Wrap functions dengan useCallback untuk fix dependency warning
   const loadCampaignDetails = useCallback(async () => {
@@ -103,6 +110,56 @@ export default function CampaignDetailPage() {
       alert('Error saat donasi: ' + (error as unknown as Error).message);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // ✅ ADD: IDRX Payment Handler
+  const handleIDRXPayment = async () => {
+    if (!donateAmount || parseFloat(donateAmount) <= 0) {
+      alert('Masukkan jumlah donasi yang valid');
+      return;
+    }
+
+    if (!donorEmail) {
+      alert('Masukkan email untuk konfirmasi pembayaran');
+      return;
+    }
+
+    setIDRXPaymentLoading(true);
+
+    try {
+      const response = await fetch('/api/idrx/mint-request', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: donateAmount,
+          campaignAddress,
+          donorEmail,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Redirect ke payment URL
+        window.open(result.paymentUrl, '_blank');
+        
+        alert(`Link pembayaran telah dibuat! Silakan selesaikan pembayaran. Reference: ${result.reference}`);
+        
+        // Reset form
+        setDonateAmount('');
+        setDonorEmail('');
+        setShowIDRXPayment(false);
+      } else {
+        alert('Gagal membuat link pembayaran: ' + result.error);
+      }
+    } catch (error) {
+      console.error('IDRX Payment Error:', error);
+      alert('Error saat membuat link pembayaran');
+    } finally {
+      setIDRXPaymentLoading(false);
     }
   };
 
@@ -373,8 +430,19 @@ export default function CampaignDetailPage() {
                 </button>
               )}
 
-              {/* Donation Section */}
-              {isConnected && campaign.status === 0 && !isOwner && (
+              {/* ✅ ADD: Payment Methods Info */}
+              {campaign.status === 0 && !isOwner && (
+                <div className="bg-blue-50 rounded-lg p-4 mb-4">
+                  <h4 className="font-medium text-blue-800 mb-2">💡 Cara Donasi:</h4>
+                  <ul className="text-sm text-blue-700 space-y-1">
+                    <li>• <strong>Dengan Wallet:</strong> Connect wallet dan bayar langsung</li>
+                    <li>• <strong>Tanpa Wallet:</strong> Bayar via transfer bank/e-wallet melalui IDRX</li>
+                  </ul>
+                </div>
+              )}
+
+              {/* ✅ UPDATE: Donation Section dengan IDRX Payment */}
+              {campaign.status === 0 && !isOwner && (
                 <div className="mb-4">
                   <div className="mb-3">
                     <input
@@ -387,13 +455,71 @@ export default function CampaignDetailPage() {
                       min="0"
                     />
                   </div>
-                  <button
-                    onClick={handleDonate}
-                    disabled={isProcessing}
-                    className="w-full bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-4 rounded-md disabled:opacity-50 transition-colors"
-                  >
-                    {isProcessing ? 'Processing...' : 'Donasi Sekarang'}
-                  </button>
+
+                  {/* Payment Method Selection */}
+                  <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                    <p className="text-sm font-medium text-gray-700 mb-2">Pilih Metode Pembayaran:</p>
+                    
+                    {/* Wallet Payment */}
+                    {isConnected && (
+                      <button
+                        onClick={handleDonate}
+                        disabled={isProcessing}
+                        className="w-full mb-2 bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-md disabled:opacity-50 transition-colors"
+                      >
+                        {isProcessing ? 'Processing...' : '💳 Bayar dengan Wallet'}
+                      </button>
+                    )}
+
+                    {/* IDRX Payment */}
+                    <button
+                      onClick={() => setShowIDRXPayment(!showIDRXPayment)}
+                      className="w-full bg-green-500 hover:bg-green-600 text-white font-medium py-2 px-4 rounded-md transition-colors"
+                    >
+                      💰 Bayar dengan IDRX (Tanpa Wallet)
+                    </button>
+                  </div>
+
+                  {/* ✅ ADD: IDRX Payment Form */}
+                  {showIDRXPayment && (
+                    <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                      <h4 className="font-medium text-green-800 mb-3">Pembayaran IDRX</h4>
+                      <div className="mb-3">
+                        <input
+                          type="email"
+                          placeholder="Email untuk konfirmasi"
+                          value={donorEmail}
+                          onChange={(e) => setDonorEmail(e.target.value)}
+                          required
+                          className="w-full px-3 py-2 border border-green-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                        />
+                      </div>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={handleIDRXPayment}
+                          disabled={idrxPaymentLoading}
+                          className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md disabled:opacity-50 transition-colors"
+                        >
+                          {idrxPaymentLoading ? 'Membuat Link...' : 'Buat Link Pembayaran'}
+                        </button>
+                        <button
+                          onClick={() => setShowIDRXPayment(false)}
+                          className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+                        >
+                          Batal
+                        </button>
+                      </div>
+                      <p className="text-xs text-green-600 mt-2">
+                        * Anda akan diarahkan ke halaman pembayaran IDRX
+                      </p>
+                    </div>
+                  )}
+
+                  {!isConnected && !showIDRXPayment && (
+                    <p className="text-center text-sm text-gray-500 mt-2">
+                      Pilih salah satu metode pembayaran di atas
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -440,6 +566,12 @@ export default function CampaignDetailPage() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* ✅ ADD: IDRX Transaction History & Payment Status Checker */}
+        <div className="grid grid-cols-1 gap-6 mt-6">
+          <AllTransactionHistory campaignAddress={campaignAddress} />
+          <PaymentStatusChecker />
         </div>
       </div>
     </div>
