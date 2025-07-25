@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 
 interface WalletTransaction {
@@ -28,6 +28,26 @@ interface IDRXTransaction {
   merchantOrderId: string;
 }
 
+// ✅ Define proper interface for IDRX API response
+interface IDRXTransactionRaw {
+  id: number;
+  customerVaName: string;
+  email: string;
+  toBeMinted: string;
+  paymentAmount: number;
+  createdAt: string;
+  paymentStatus: string;
+  userMintStatus: string;
+  reference: string;
+  txHash: string;
+  merchantOrderId: string;
+}
+
+interface IDRXAPIResponse {
+  success: boolean;
+  data: IDRXTransactionRaw[];
+}
+
 type Transaction = WalletTransaction | IDRXTransaction;
 
 interface AllTransactionHistoryProps {
@@ -40,11 +60,8 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  useEffect(() => {
-    loadAllTransactions();
-  }, [campaignAddress, page]);
-
-  const loadAllTransactions = async () => {
+  // ✅ Fix: Use useCallback to prevent dependency warning
+  const loadAllTransactions = useCallback(async () => {
     try {
       setLoading(true);
 
@@ -69,7 +86,11 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
     } finally {
       setLoading(false);
     }
-  };
+  }, [campaignAddress, page]); // ✅ Include dependencies
+
+  useEffect(() => {
+    loadAllTransactions();
+  }, [loadAllTransactions]); // ✅ Include loadAllTransactions as dependency
 
   const loadWalletTransactions = async (): Promise<WalletTransaction[]> => {
     try {
@@ -77,7 +98,6 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
       
       const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
       
-      // ✅ FIX: Import ABI dari file yang benar
       const CampaignABI = await import('@/contracts/Campaign.json');
       
       const campaignContract = new ethers.Contract(
@@ -88,8 +108,7 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
 
       console.log('📝 Contract created, getting events...');
 
-      // ✅ FIX: Gunakan event name yang benar dari contract
-      const donationFilter = campaignContract.filters.Donated(); // Ganti dari DonationReceived ke Donated
+      const donationFilter = campaignContract.filters.Donated();
       const events = await campaignContract.queryFilter(donationFilter);
       
       console.log('✅ Found Donated events:', events.length);
@@ -102,7 +121,7 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
       const walletTxs = await Promise.all(
         events.map(async (event) => {
           const receipt = await provider.getTransactionReceipt(event.transactionHash);
-          const block = await provider.getBlock(receipt!.blockNumber); // Get block for timestamp
+          const block = await provider.getBlock(receipt!.blockNumber);
           const token = new ethers.Contract(
             process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!,
             ["function decimals() view returns(uint8)"],
@@ -112,9 +131,9 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
 
           return {
             type: 'wallet' as const,
-            donor: (event as ethers.EventLog).args[0], // donor address
-            amount: ethers.formatUnits((event as ethers.EventLog).args[1], decimals), // amount
-            timestamp: block!.timestamp, // ✅ Gunakan block timestamp, bukan event args[2]
+            donor: (event as ethers.EventLog).args[0],
+            amount: ethers.formatUnits((event as ethers.EventLog).args[1], decimals),
+            timestamp: block!.timestamp,
             status: 'COMPLETED' as const,
             txHash: event.transactionHash,
             blockNumber: receipt!.blockNumber
@@ -136,10 +155,11 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
         `/api/idrx/transaction-history?transactionType=MINT&campaignAddress=${campaignAddress}&page=1&take=1000`
       );
       
-      const result = await response.json();
+      const result: IDRXAPIResponse = await response.json(); // ✅ Proper typing
       
       if (result.success && result.data) {
-        return result.data.map((tx: any) => ({
+        // ✅ Fix: Use proper typing instead of any
+        return result.data.map((tx: IDRXTransactionRaw) => ({
           type: 'idrx' as const,
           id: tx.id,
           donor: tx.customerVaName || 'Anonymous',
@@ -206,7 +226,8 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
         </p>
       ) : (
         <div className="space-y-4">
-          {transactions.map((tx, index) => (
+          {/* ✅ Fix: Remove unused index parameter */}
+          {transactions.map((tx) => (
             <div key={tx.type === 'wallet' ? tx.txHash : tx.id} className="border border-gray-200 rounded-lg p-4">
               <div className="flex justify-between items-start mb-3">
                 <div>

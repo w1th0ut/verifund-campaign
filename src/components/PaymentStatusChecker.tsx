@@ -2,9 +2,25 @@
 
 import { useState } from 'react';
 
+// ✅ Define proper interface for payment status
+interface PaymentStatus {
+  paymentStatus: string;
+  userMintStatus: string;
+  toBeMinted: string;
+  paymentAmount: number;
+  customerVaName: string;
+  email: string;
+  txHash?: string;
+}
+
+interface APIResponse {
+  success: boolean;
+  data: PaymentStatus | null;
+}
+
 export default function PaymentStatusChecker() {
   const [reference, setReference] = useState('');
-  const [status, setStatus] = useState<any>(null);
+  const [status, setStatus] = useState<PaymentStatus | null>(null); // ✅ Proper typing
   const [loading, setLoading] = useState(false);
 
   const checkStatus = async () => {
@@ -19,7 +35,7 @@ export default function PaymentStatusChecker() {
         `/api/idrx/transaction-history?transactionType=MINT&reference=${reference}`
       );
       
-      const result = await response.json();
+      const result: APIResponse = await response.json(); // ✅ Proper typing
       
       if (result.success && result.data) {
         setStatus(result.data);
