@@ -67,7 +67,7 @@ export default function CampaignDetailPage() {
     if (!userWallet || !campaign) return;
     
     try {
-      const donation = await web3Service.getUserDonation(campaignAddress, userWallet);
+      const donation = await web3Service.getDirectTransfers(campaignAddress, userWallet);
       setUserDonation(donation);
     } catch (error) {
       console.error('Error loading user donation:', error);
