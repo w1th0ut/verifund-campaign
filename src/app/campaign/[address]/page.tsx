@@ -17,6 +17,7 @@ interface CampaignDetails {
   name: string;
   target: string;
   raised: string;
+  actualBalance: string;
   timeRemaining: number;
   status: number;
   ipfsHash: string;
@@ -237,7 +238,13 @@ export default function CampaignDetailPage() {
 
   const isOwner = userWallet && campaign && userWallet.toLowerCase() === campaign.owner.toLowerCase();
   const hasDonated = parseFloat(userDonation) > 0;
-  const progressPercentage = campaign ? Math.min((parseFloat(campaign.raised) / parseFloat(campaign.target)) * 100, 100) : 0;
+  
+  // Safely calculate progress percentage using actualBalance
+  const parsedActualBalance = campaign ? parseFloat(campaign.actualBalance || '0') || 0 : 0;
+  const parsedTarget = campaign ? parseFloat(campaign.target || '0') || 0 : 0;
+  const progressPercentage = parsedTarget > 0 
+    ? Math.min((parsedActualBalance / parsedTarget) * 100, 100)
+    : 0;
 
   const canWithdraw = isOwner && campaign?.timeRemaining === 0 && campaign?.status === 1;
   const canRefund = hasDonated && campaign?.timeRemaining === 0 && campaign?.status === 2;
@@ -360,7 +367,10 @@ export default function CampaignDetailPage() {
                 </div>
                 <div>
                   <span className="font-medium text-gray-600">Terkumpul:</span>
-                  <p className="text-gray-800">{formatNumber(campaign.raised)} IDRX</p>
+                  <p className="text-gray-800">{formatNumber(campaign.actualBalance)} IDRX</p>
+                  {/* {parseFloat(campaign.actualBalance) > parseFloat(campaign.raised) && (
+                    <p className="text-xs text-orange-600">*Termasuk IDRX: +{formatNumber((parseFloat(campaign.actualBalance) - parseFloat(campaign.raised)).toString())}</p>
+                  )} */}
                 </div>
                 <div>
                   <span className="font-medium text-gray-600">Sisa Waktu:</span>
@@ -379,11 +389,16 @@ export default function CampaignDetailPage() {
             <div className="bg-white rounded-lg shadow-md p-6 mb-6">
               <div className="text-center mb-4">
                 <div className="text-2xl font-bold text-gray-800 mb-1">
-                  {formatNumber(campaign.raised)} IDRX
+                  {formatNumber(campaign.actualBalance)} IDRX
                 </div>
                 <div className="text-gray-600">
                   dari target {formatNumber(campaign.target)} IDRX
                 </div>
+                {/* {parseFloat(campaign.actualBalance) > parseFloat(campaign.raised) && (
+                  <div className="text-xs text-orange-600 mt-1">
+                    *Termasuk pembayaran IDRX: +{formatNumber((parseFloat(campaign.actualBalance) - parseFloat(campaign.raised)).toString())}
+                  </div>
+                )} */}
               </div>
 
               <div className="w-full bg-gray-200 rounded-full h-3 mb-4">

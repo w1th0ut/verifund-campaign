@@ -11,6 +11,7 @@ interface WalletTransaction {
   status: 'COMPLETED';
   txHash: string;
   blockNumber: number;
+  method: 'donate' | 'transfer'; // Add method to distinguish donation types
 }
 
 interface IDRXTransaction {
@@ -60,53 +61,36 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  // ✅ Fix: Use useCallback to prevent dependency warning
-  const loadAllTransactions = useCallback(async () => {
-    try {
-      setLoading(true);
-
-      // Load wallet transactions dan IDRX transactions secara parallel
-      const [walletTxs, idrxTxs] = await Promise.all([
-        loadWalletTransactions(),
-        loadIDRXTransactions()
-      ]);
-
-      // Combine dan sort by timestamp (newest first)
-      const allTxs = [...walletTxs, ...idrxTxs].sort((a, b) => b.timestamp - a.timestamp);
-      
-      // Pagination client-side (10 per page)
-      const startIndex = (page - 1) * 10;
-      const endIndex = startIndex + 10;
-      const paginatedTxs = allTxs.slice(startIndex, endIndex);
-      
-      setTransactions(paginatedTxs);
-      setTotalPages(Math.ceil(allTxs.length / 10));
-    } catch (error) {
-      console.error('Error loading all transactions:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [campaignAddress, page]); // ✅ Include dependencies
-
-  useEffect(() => {
-    loadAllTransactions();
-  }, [loadAllTransactions]); // ✅ Include loadAllTransactions as dependency
-
-  const loadWalletTransactions = async (): Promise<WalletTransaction[]> => {
+  const loadWalletTransactions = useCallback(async (): Promise<WalletTransaction[]> => {
     try {
       console.log('🔍 Loading wallet transactions for:', campaignAddress);
       
       const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_RPC_URL);
       
-      const CampaignABI = await import('@/contracts/Campaign.json');
+      // Load both donate() events and direct transfers
+      const [donateEvents, transferEvents] = await Promise.all([
+        loadDonateEvents(provider),
+        loadDirectTransfers(provider)
+      ]);
       
+      const allWalletTxs = [...donateEvents, ...transferEvents];
+      console.log('✅ Total wallet transactions:', allWalletTxs.length);
+      
+      return allWalletTxs;
+    } catch (error) {
+      console.error('❌ Error loading wallet transactions:', error);
+      return [];
+    }
+  }, [campaignAddress]);
+
+  const loadDonateEvents = async (provider: ethers.JsonRpcProvider): Promise<WalletTransaction[]> => {
+    try {
+      const CampaignABI = await import('@/contracts/Campaign.json');
       const campaignContract = new ethers.Contract(
         campaignAddress,
         CampaignABI.abi,
         provider
       );
-
-      console.log('📝 Contract created, getting events...');
 
       const donationFilter = campaignContract.filters.Donated();
       const events = await campaignContract.queryFilter(donationFilter);
@@ -114,11 +98,10 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
       console.log('✅ Found Donated events:', events.length);
 
       if (events.length === 0) {
-        console.log('⚠️ No wallet transactions found');
         return [];
       }
 
-      const walletTxs = await Promise.all(
+      const donateTransactions = await Promise.all(
         events.map(async (event) => {
           const receipt = await provider.getTransactionReceipt(event.transactionHash);
           const block = await provider.getBlock(receipt!.blockNumber);
@@ -136,20 +119,81 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
             timestamp: block!.timestamp,
             status: 'COMPLETED' as const,
             txHash: event.transactionHash,
-            blockNumber: receipt!.blockNumber
+            blockNumber: receipt!.blockNumber,
+            method: 'donate' as const
           };
         })
       );
 
-      console.log('✅ Processed wallet transactions:', walletTxs);
-      return walletTxs;
+      return donateTransactions;
     } catch (error) {
-      console.error('❌ Error loading wallet transactions:', error);
+      console.error('❌ Error loading donate events:', error);
       return [];
     }
   };
 
-  const loadIDRXTransactions = async (): Promise<IDRXTransaction[]> => {
+  const loadDirectTransfers = async (provider: ethers.JsonRpcProvider): Promise<WalletTransaction[]> => {
+    try {
+      // Create token contract instance
+      const tokenContract = new ethers.Contract(
+        process.env.NEXT_PUBLIC_IDRX_TOKEN_ADDRESS!,
+        [
+          "event Transfer(address indexed from, address indexed to, uint256 value)",
+          "function decimals() view returns(uint8)"
+        ],
+        provider
+      );
+
+      // Query Transfer events TO the campaign address
+      const transferFilter = tokenContract.filters.Transfer(null, campaignAddress);
+      const transferEvents = await tokenContract.queryFilter(transferFilter);
+      
+      console.log('✅ Found direct Transfer events:', transferEvents.length);
+
+      if (transferEvents.length === 0) {
+        return [];
+      }
+
+      const decimals = await tokenContract.decimals();
+
+      // Get all donate transaction hashes to avoid duplicates
+      const CampaignABI = await import('@/contracts/Campaign.json');
+      const campaignContract = new ethers.Contract(
+        campaignAddress,
+        CampaignABI.abi,
+        provider
+      );
+      const donateEvents = await campaignContract.queryFilter(campaignContract.filters.Donated());
+      const donateTxHashes = new Set(donateEvents.map(event => event.transactionHash));
+
+      const directTransfers = await Promise.all(
+        transferEvents
+          .filter(event => !donateTxHashes.has(event.transactionHash)) // Exclude donate() transactions
+          .map(async (event) => {
+            const receipt = await provider.getTransactionReceipt(event.transactionHash);
+            const block = await provider.getBlock(receipt!.blockNumber);
+
+            return {
+              type: 'wallet' as const,
+              donor: (event as ethers.EventLog).args[0], // from address
+              amount: ethers.formatUnits((event as ethers.EventLog).args[2], decimals), // value
+              timestamp: block!.timestamp,
+              status: 'COMPLETED' as const,
+              txHash: event.transactionHash,
+              blockNumber: receipt!.blockNumber,
+              method: 'transfer' as const
+            };
+          })
+      );
+
+      return directTransfers;
+    } catch (error) {
+      console.error('❌ Error loading direct transfers:', error);
+      return [];
+    }
+  };
+
+  const loadIDRXTransactions = useCallback(async (): Promise<IDRXTransaction[]> => {
     try {
       const response = await fetch(
         `/api/idrx/transaction-history?transactionType=MINT&campaignAddress=${campaignAddress}&page=1&take=1000`
@@ -179,7 +223,39 @@ export default function AllTransactionHistory({ campaignAddress }: AllTransactio
       console.error('Error loading IDRX transactions:', error);
       return [];
     }
-  };
+  }, [campaignAddress]);
+
+  // ✅ Fix: Use useCallback to prevent dependency warning
+  const loadAllTransactions = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      // Load wallet transactions dan IDRX transactions secara parallel
+      const [walletTxs, idrxTxs] = await Promise.all([
+        loadWalletTransactions(),
+        loadIDRXTransactions()
+      ]);
+
+      // Combine dan sort by timestamp (newest first)
+      const allTxs = [...walletTxs, ...idrxTxs].sort((a, b) => b.timestamp - a.timestamp);
+      
+      // Pagination client-side (10 per page)
+      const startIndex = (page - 1) * 10;
+      const endIndex = startIndex + 10;
+      const paginatedTxs = allTxs.slice(startIndex, endIndex);
+      
+      setTransactions(paginatedTxs);
+      setTotalPages(Math.ceil(allTxs.length / 10));
+    } catch (error) {
+      console.error('Error loading all transactions:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [campaignAddress, page, loadWalletTransactions, loadIDRXTransactions]); // ✅ Include dependencies
+
+  useEffect(() => {
+    loadAllTransactions();
+  }, [loadAllTransactions]); // ✅ Include loadAllTransactions as dependency
 
   const getStatusBadge = (status: string) => {
     const statusConfig = {

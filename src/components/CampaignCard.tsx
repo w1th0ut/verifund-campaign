@@ -12,6 +12,7 @@ interface CampaignCardProps {
   name: string;
   target: string;
   raised: string;
+  actualBalance: string;
   timeRemaining: number;
   status: number;
   ipfsHash: string;
@@ -23,7 +24,8 @@ export default function CampaignCard({
   owner, 
   name, 
   target, 
-  raised, 
+  raised,
+  actualBalance, 
   timeRemaining, 
   status, 
   ipfsHash,
@@ -84,7 +86,20 @@ export default function CampaignCard({
     router.push(`/campaign/${address}`);
   };
 
-  const progressPercentage = Math.min((parseFloat(raised) / parseFloat(target)) * 100, 100);
+  // Safely parse numbers with fallback to 0
+  const parsedActualBalance = parseFloat(actualBalance || '0') || 0;
+  const parsedTarget = parseFloat(target || '0') || 0;
+  const parsedRaised = parseFloat(raised || '0') || 0;
+  
+  // Calculate progress percentage safely
+  const progressPercentage = parsedTarget > 0 
+    ? Math.min((parsedActualBalance / parsedTarget) * 100, 100)
+    : 0;
+  
+  const hasUnrecordedDonations = parsedActualBalance > parsedRaised;
+  const unrecordedAmount = hasUnrecordedDonations 
+    ? parsedActualBalance - parsedRaised 
+    : 0;
 
   if (isLoading) {
     return (
@@ -155,7 +170,14 @@ export default function CampaignCard({
         <div className="space-y-2 text-sm mb-4">
           <div className="flex justify-between">
             <span className="font-medium">Terkumpul:</span>
-            <span>{raised} IDRX</span>
+            <div className="text-right">
+              <span className="text-green-600 font-semibold">{actualBalance} IDRX</span>
+              {/* {hasUnrecordedDonations && (
+                <div className="text-xs text-orange-600">
+                  +{unrecordedAmount.toFixed(2)} IDRX (IDRX Payment)
+                </div>
+              )} */}
+            </div>
           </div>
           
           <div className="flex justify-between">
@@ -165,7 +187,7 @@ export default function CampaignCard({
           
           <div className="flex justify-between">
             <span className="font-medium">Progress:</span>
-            <span>{progressPercentage.toFixed(1)}%</span>
+            <span>{isNaN(progressPercentage) ? '0.0' : progressPercentage.toFixed(1)}%</span>
           </div>
           
           <div className="flex justify-between">
@@ -178,9 +200,20 @@ export default function CampaignCard({
         <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
           <div
             className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-            style={{ width: `${progressPercentage}%` }}
+            style={{ width: `${isNaN(progressPercentage) ? 0 : Math.max(0, Math.min(progressPercentage, 100))}%` }}
           ></div>
         </div>
+
+        {/* {hasUnrecordedDonations && (
+          <div className="mb-4 p-2 bg-orange-50 border border-orange-200 rounded-md">
+            <div className="flex items-center text-xs text-orange-800">
+              <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <span>Includes IDRX payments (+{unrecordedAmount.toFixed(2)})</span>
+            </div>
+          </div>
+        )} */}
 
         {/* Description Preview */}
         {metadata?.description && (

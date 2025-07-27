@@ -10,6 +10,7 @@ interface Campaign {
   name: string;
   target: string;
   raised: string;
+  actualBalance: string;
   timeRemaining: number;
   status: number;
   ipfsHash: string;
@@ -74,6 +75,7 @@ export default function CampaignList() {
               name={campaign.name}
               target={campaign.target}
               raised={campaign.raised}
+              actualBalance={campaign.actualBalance}
               timeRemaining={campaign.timeRemaining}
               status={campaign.status}
               ipfsHash={campaign.ipfsHash}
