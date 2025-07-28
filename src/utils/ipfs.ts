@@ -16,7 +16,7 @@ export const uploadToIPFS = async (metadata: CampaignMetadata): Promise<string> 
       {
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_PINATA_JWT!}`,
+          'Authorization': `Bearer ${process.env.PINATA_JWT!}`,
         },
       }
     );
@@ -37,7 +37,7 @@ export const uploadImageToIPFS = async (file: File): Promise<string> => {
       formData,
       {
         headers: {
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_PINATA_JWT!}`,
+          'Authorization': `Bearer ${process.env.PINATA_JWT!}`,
         },
       }
     );
