@@ -60,7 +60,7 @@ export default function CampaignCard({
       case 0: return 'Aktif';
       case 1: return 'Berhasil';
       case 2: return 'Gagal';
-      default: return 'Unknown';
+      default: return 'Aktif';
     }
   };
 
@@ -69,7 +69,7 @@ export default function CampaignCard({
       case 0: return 'text-blue-600 bg-blue-100';
       case 1: return 'text-green-600 bg-green-100';
       case 2: return 'text-red-600 bg-red-100';
-      default: return 'text-gray-600 bg-gray-100';
+      default: return 'text-blue-600 bg-blue-100';
     }
   };
 
@@ -89,33 +89,27 @@ export default function CampaignCard({
     router.push(`/campaign/${address}`);
   };
 
-  // Safely parse numbers with fallback to 0
   const parsedActualBalance = parseFloat(actualBalance || '0') || 0;
   const parsedTarget = parseFloat(target || '0') || 0;
   const parsedRaised = parseFloat(raised || '0') || 0;
   
-  // Effect to preserve the peak amount when campaign transitions to failed status
   useEffect(() => {
     const currentAmount = Math.max(parsedActualBalance, parsedRaised);
     
-    // If campaign is failed and we haven't preserved amount yet
     if (status === 2 && preservedAmount === null && currentAmount > 0) {
       setPreservedAmount(currentAmount);
     }
-    // Reset preservation for active campaigns
     else if (status === 0) {
       setPreservedAmount(null);
     }
   }, [status, parsedActualBalance, parsedRaised, preservedAmount]);
   
-  // ✅ FIXED: Display logic based on campaign status with client-side preservation
   const displayAmount = status === 0
-    ? parsedActualBalance  // Real-time for active campaigns
+    ? parsedActualBalance
     : status === 1
-      ? Math.max(parsedRaised, parsedActualBalance)  // Locked for successful campaigns
-      : preservedAmount || Math.max(parsedRaised, parsedActualBalance);  // Use preserved amount for failed campaigns
+      ? Math.max(parsedRaised, parsedActualBalance)
+      : preservedAmount || Math.max(parsedRaised, parsedActualBalance);
   
-  // Calculate progress percentage based on display amount
   const progressPercentage = parsedTarget > 0 
     ? Math.min((displayAmount / parsedTarget) * 100, 100)
     : 0;
@@ -196,11 +190,6 @@ export default function CampaignCard({
             <span className="font-medium">Terkumpul:</span>
             <div className="text-right">
               <span className="text-green-600 font-semibold">{displayAmount.toFixed(2)} IDRX</span>
-              {/* {hasUnrecordedDonations && (
-                <div className="text-xs text-orange-600">
-                  +{unrecordedAmount.toFixed(2)} IDRX (IDRX Payment)
-                </div>
-              )} */}
             </div>
           </div>
           
@@ -227,17 +216,6 @@ export default function CampaignCard({
             style={{ width: `${isNaN(progressPercentage) ? 0 : Math.max(0, Math.min(progressPercentage, 100))}%` }}
           ></div>
         </div>
-
-        {/* {hasUnrecordedDonations && (
-          <div className="mb-4 p-2 bg-orange-50 border border-orange-200 rounded-md">
-            <div className="flex items-center text-xs text-orange-800">
-              <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              </svg>
-              <span>Includes IDRX payments (+{unrecordedAmount.toFixed(2)})</span>
-            </div>
-          </div>
-        )} */}
 
         {/* Description Preview */}
         {metadata?.description && (
