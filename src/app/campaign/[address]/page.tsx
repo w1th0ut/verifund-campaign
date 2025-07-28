@@ -239,14 +239,44 @@ export default function CampaignDetailPage() {
   const isOwner = userWallet && campaign && userWallet.toLowerCase() === campaign.owner.toLowerCase();
   const hasDonated = parseFloat(userDonation) > 0;
   
-  // Safely calculate progress percentage using actualBalance
-  const parsedActualBalance = campaign ? parseFloat(campaign.actualBalance || '0') || 0 : 0;
+  // ✅ FIXED: Display logic based on campaign status with client-side preservation
+  const [preservedAmount, setPreservedAmount] = useState<number | null>(null);
+  
+  // Effect to preserve the peak amount when campaign transitions to failed status
+  useEffect(() => {
+    if (campaign) {
+      const currentActualBalance = parseFloat(campaign.actualBalance || '0') || 0;
+      const currentRaised = parseFloat(campaign.raised || '0') || 0;
+      const currentAmount = Math.max(currentActualBalance, currentRaised);
+      
+      // If campaign just became failed and we haven't preserved amount yet
+      if (campaign.status === 2 && preservedAmount === null && currentAmount > 0) {
+        setPreservedAmount(currentAmount);
+      }
+      // Reset preservation for active campaigns
+      else if (campaign.status === 0) {
+        setPreservedAmount(null);
+      }
+    }
+  }, [campaign, preservedAmount]);
+  
+  const displayAmount = campaign 
+    ? campaign.status === 0
+      ? parseFloat(campaign.actualBalance || '0') || 0  // Real-time for active campaigns
+      : campaign.status === 1
+        ? Math.max(parseFloat(campaign.raised || '0') || 0, parseFloat(campaign.actualBalance || '0') || 0)  // Locked for successful campaigns
+        : preservedAmount || Math.max(parseFloat(campaign.raised || '0') || 0, parseFloat(campaign.actualBalance || '0') || 0)  // Use preserved amount for failed campaigns
+    : 0;
+  
   const parsedTarget = campaign ? parseFloat(campaign.target || '0') || 0 : 0;
   const progressPercentage = parsedTarget > 0 
-    ? Math.min((parsedActualBalance / parsedTarget) * 100, 100)
+    ? Math.min((displayAmount / parsedTarget) * 100, 100)
     : 0;
 
   const canWithdraw = isOwner && campaign?.timeRemaining === 0 && campaign?.status === 1;
+  
+  // ✅ FIXED: Refund should be available for any user who donated, not just connected wallet
+  // Check if user has donated using direct transfers (works for both wallet and IDRX payments)
   const canRefund = hasDonated && campaign?.timeRemaining === 0 && campaign?.status === 2;
 
   if (isLoading) {
@@ -367,10 +397,7 @@ export default function CampaignDetailPage() {
                 </div>
                 <div>
                   <span className="font-medium text-gray-600">Terkumpul:</span>
-                  <p className="text-gray-800">{formatNumber(campaign.actualBalance)} IDRX</p>
-                  {/* {parseFloat(campaign.actualBalance) > parseFloat(campaign.raised) && (
-                    <p className="text-xs text-orange-600">*Termasuk IDRX: +{formatNumber((parseFloat(campaign.actualBalance) - parseFloat(campaign.raised)).toString())}</p>
-                  )} */}
+                  <p className="text-gray-800">{formatNumber(displayAmount.toString())} IDRX</p>
                 </div>
                 <div>
                   <span className="font-medium text-gray-600">Sisa Waktu:</span>
@@ -389,11 +416,17 @@ export default function CampaignDetailPage() {
             <div className="bg-white rounded-lg shadow-md p-6 mb-6">
               <div className="text-center mb-4">
                 <div className="text-2xl font-bold text-gray-800 mb-1">
-                  {formatNumber(campaign.actualBalance)} IDRX
+                  {formatNumber(displayAmount.toString())} IDRX
                 </div>
                 <div className="text-gray-600">
                   dari target {formatNumber(campaign.target)} IDRX
                 </div>
+                {/* Show current balance info only for active campaigns */}
+                {campaign.status === 0 && parseFloat(campaign.actualBalance) !== parseFloat(campaign.raised) && (
+                  <div className="text-xs text-blue-600 mt-1">
+                    *Saldo aktual: {formatNumber(campaign.actualBalance)} IDRX
+                  </div>
+                )}
                 {/* {parseFloat(campaign.actualBalance) > parseFloat(campaign.raised) && (
                   <div className="text-xs text-orange-600 mt-1">
                     *Termasuk pembayaran IDRX: +{formatNumber((parseFloat(campaign.actualBalance) - parseFloat(campaign.raised)).toString())}
@@ -559,10 +592,11 @@ export default function CampaignDetailPage() {
                 </div>
               )}
 
-              {/* Donor Refund Actions */}
-              {isConnected && !isOwner && (
+              {/* ✅ FIXED: Donor Refund Actions - Show for all users when campaign failed */}
+              {!isOwner && (
                 <div className="space-y-3">
-                  {canRefund && (
+                  {/* Show refund button for failed campaigns - only if user is connected */}
+                  {campaign.status === 2 && isConnected && (
                     <button
                       onClick={handleRefund}
                       disabled={isProcessing}
@@ -572,9 +606,36 @@ export default function CampaignDetailPage() {
                     </button>
                   )}
                   
-                  {hasDonated && !canRefund && campaign.status !== 2 && (
+                  {/* Show refund info for failed campaigns */}
+                  {campaign.status === 2 && (
+                    <div className="bg-red-50 rounded-lg p-4">
+                      <div className="text-sm text-red-800 font-medium mb-2">🔄 Campaign Gagal - Refund Tersedia</div>
+                      {isConnected ? (
+                        <div className="text-xs text-red-600">
+                          {hasDonated 
+                            ? `Anda dapat melakukan refund donasi sebesar ${formatNumber(userDonation)} IDRX`
+                            : 'Klik tombol Refund jika Anda pernah melakukan donasi ke campaign ini'
+                          }
+                        </div>
+                      ) : (
+                        <div className="text-xs text-red-600">
+                          Connect wallet untuk melakukan refund donasi Anda
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Show info for active campaigns */}
+                  {hasDonated && campaign.status === 0 && (
                     <div className="text-sm text-gray-600 text-center p-3 bg-gray-50 rounded-md">
                       Refund akan tersedia jika campaign gagal (target tidak tercapai)
+                    </div>
+                  )}
+                  
+                  {/* Show info for successful campaigns */}
+                  {hasDonated && campaign.status === 1 && (
+                    <div className="text-sm text-green-600 text-center p-3 bg-green-50 rounded-md">
+                      ✅ Campaign berhasil! Dana telah disalurkan kepada pemilik campaign.
                     </div>
                   )}
                 </div>
@@ -583,7 +644,7 @@ export default function CampaignDetailPage() {
           </div>
         </div>
 
-        {/* ✅ ADD: IDRX Transaction History & Payment Status Checker */}
+        {/* IDRX Transaction History & Payment Status Checker */}
         <div className="grid grid-cols-1 gap-6 mt-6">
           <AllTransactionHistory campaignAddress={campaignAddress} />
           <PaymentStatusChecker />

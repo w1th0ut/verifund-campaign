@@ -33,6 +33,7 @@ export default function CampaignCard({
 }: CampaignCardProps) {
   const [metadata, setMetadata] = useState<CampaignMetadata | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [preservedAmount, setPreservedAmount] = useState<number | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -77,9 +78,11 @@ export default function CampaignCard({
     
     const days = Math.floor(seconds / (24 * 3600));
     const hours = Math.floor((seconds % (24 * 3600)) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
     
     if (days > 0) return `${days} hari ${hours} jam`;
-    return `${hours} jam`;
+    if (hours > 0) return `${hours} jam ${minutes} menit`;
+    return `${minutes} menit`;
   };
 
   const handleCardClick = () => {
@@ -91,9 +94,30 @@ export default function CampaignCard({
   const parsedTarget = parseFloat(target || '0') || 0;
   const parsedRaised = parseFloat(raised || '0') || 0;
   
-  // Calculate progress percentage safely
+  // Effect to preserve the peak amount when campaign transitions to failed status
+  useEffect(() => {
+    const currentAmount = Math.max(parsedActualBalance, parsedRaised);
+    
+    // If campaign is failed and we haven't preserved amount yet
+    if (status === 2 && preservedAmount === null && currentAmount > 0) {
+      setPreservedAmount(currentAmount);
+    }
+    // Reset preservation for active campaigns
+    else if (status === 0) {
+      setPreservedAmount(null);
+    }
+  }, [status, parsedActualBalance, parsedRaised, preservedAmount]);
+  
+  // ✅ FIXED: Display logic based on campaign status with client-side preservation
+  const displayAmount = status === 0
+    ? parsedActualBalance  // Real-time for active campaigns
+    : status === 1
+      ? Math.max(parsedRaised, parsedActualBalance)  // Locked for successful campaigns
+      : preservedAmount || Math.max(parsedRaised, parsedActualBalance);  // Use preserved amount for failed campaigns
+  
+  // Calculate progress percentage based on display amount
   const progressPercentage = parsedTarget > 0 
-    ? Math.min((parsedActualBalance / parsedTarget) * 100, 100)
+    ? Math.min((displayAmount / parsedTarget) * 100, 100)
     : 0;
   
   const hasUnrecordedDonations = parsedActualBalance > parsedRaised;
@@ -171,7 +195,7 @@ export default function CampaignCard({
           <div className="flex justify-between">
             <span className="font-medium">Terkumpul:</span>
             <div className="text-right">
-              <span className="text-green-600 font-semibold">{actualBalance} IDRX</span>
+              <span className="text-green-600 font-semibold">{displayAmount.toFixed(2)} IDRX</span>
               {/* {hasUnrecordedDonations && (
                 <div className="text-xs text-orange-600">
                   +{unrecordedAmount.toFixed(2)} IDRX (IDRX Payment)

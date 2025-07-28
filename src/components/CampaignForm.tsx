@@ -12,7 +12,7 @@ interface CampaignFormData {
   category: string;
   description: string;
   targetAmount: string;
-  durationInDays: number;
+  durationInMinutes: number;
   image: File | null;
 }
 
@@ -30,7 +30,7 @@ export default function CampaignForm() {
     category: '',
     description: '',
     targetAmount: '',
-    durationInDays: 30,
+    durationInMinutes: 60, // Default 1 hour
     image: null,
   });
   
@@ -44,7 +44,7 @@ export default function CampaignForm() {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'durationInDays' ? parseInt(value) : value
+      [name]: name === 'durationInMinutes' ? parseInt(value) : value
     }));
   };
 
@@ -89,10 +89,13 @@ export default function CampaignForm() {
 
       const ipfsHash = await uploadToIPFS(metadata);
       
+      // Convert minutes to seconds for smart contract
+      const durationInSeconds = formData.durationInMinutes * 60; // Convert minutes to seconds
+      
       const txHash = await web3Service.createCampaign(
         formData.name,
         formData.targetAmount,
-        formData.durationInDays,
+        durationInSeconds,
         ipfsHash
       );
 
@@ -105,7 +108,7 @@ export default function CampaignForm() {
         category: '',
         description: '',
         targetAmount: '',
-        durationInDays: 30,
+        durationInMinutes: 60, // Reset to 1 hour
         image: null,
       });
       
@@ -292,20 +295,26 @@ export default function CampaignForm() {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Durasi (hari)
+            Durasi (menit)
           </label>
           <input
             type="number"
-            name="durationInDays"
-            value={formData.durationInDays}
+            name="durationInMinutes"
+            value={formData.durationInMinutes}
             onChange={handleInputChange}
             required
             min="1"
-            max="365"
+            max="525600"
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <p className="text-xs text-gray-500 mt-1">
-            Berapa hari kampanye akan berjalan (maksimal 365 hari)
+            Berapa menit kampanye akan berjalan (1 menit - 365 hari)
+          </p>
+          <p className="text-xs text-blue-600 mt-1">
+            💡 Tips: 60 menit = 1 jam, 1440 menit = 1 hari, 10080 menit = 1 minggu
+          </p>
+          <p className="text-xs text-green-600 mt-1">
+            ✅ Durasi presisi: Smart contract mendukung durasi dalam menit yang akurat!
           </p>
         </div>
 
