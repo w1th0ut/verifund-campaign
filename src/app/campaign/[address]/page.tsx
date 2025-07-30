@@ -18,6 +18,8 @@ interface CampaignDetails {
   target: string;
   raised: string;
   actualBalance: string;
+  peakBalance: string;
+  isPeakBalanceUpdated: boolean;
   timeRemaining: number;
   status: number;
   ipfsHash: string;
@@ -157,6 +159,24 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const handleUpdatePeakBalance = async () => {
+    if (!isConnected) {
+      connectWallet();
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const txHash = await web3Service.updatePeakBalance(campaignAddress);
+      alert(`Peak balance berhasil diupdate! Transaction hash: ${txHash}`);
+      await loadCampaignDetails();
+    } catch (error) {
+      alert('Error saat update peak balance: ' + (error as unknown as Error).message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleWithdraw = async () => {
     if (!isConnected) {
       connectWallet();
@@ -252,8 +272,10 @@ export default function CampaignDetailPage() {
   const displayAmount = campaign 
     ? campaign.status === 0
       ? parseFloat(campaign.actualBalance || '0') || 0
-      : campaign.status === 1
-        ? Math.max(parseFloat(campaign.raised || '0') || 0, parseFloat(campaign.actualBalance || '0') || 0)
+      : campaign.status === 1 || campaign.status === 2
+        ? (campaign.isPeakBalanceUpdated && parseFloat(campaign.peakBalance || '0') > 0)
+          ? parseFloat(campaign.peakBalance || '0')
+          : Math.max(parseFloat(campaign.raised || '0') || 0, parseFloat(campaign.actualBalance || '0') || 0)
         : preservedAmount || Math.max(parseFloat(campaign.raised || '0') || 0, parseFloat(campaign.actualBalance || '0') || 0)
     : 0;
   
@@ -262,7 +284,16 @@ export default function CampaignDetailPage() {
     ? Math.min((displayAmount / parsedTarget) * 100, 100)
     : 0;
 
+  // Check if external transfers exist (actualBalance > raised)
+  const hasExternalTransfers = campaign ? 
+    parseFloat(campaign.actualBalance || '0') > parseFloat(campaign.raised || '0') 
+    : false;
+  
+  const canUpdatePeakBalance = isOwner && campaign?.timeRemaining === 0 && 
+    !campaign?.isPeakBalanceUpdated && hasExternalTransfers && parseFloat(campaign?.actualBalance || '0') > 0;
+  
   const canWithdraw = isOwner && campaign?.timeRemaining === 0 && 
+    (campaign?.isPeakBalanceUpdated || !hasExternalTransfers) &&
     (campaign?.status === 1 ||
      (campaign?.status === 2 && campaign?.isOwnerVerified));
   
@@ -411,10 +442,16 @@ export default function CampaignDetailPage() {
                 <div className="text-gray-600">
                   dari target {formatNumber(campaign.target)} IDRX
                 </div>
-                {/* Show current balance info only for active campaigns */}
+                {/* Show balance info */}
                 {campaign.status === 0 && parseFloat(campaign.actualBalance) !== parseFloat(campaign.raised) && (
                   <div className="text-xs text-blue-600 mt-1">
                     *Saldo aktual: {formatNumber(campaign.actualBalance)} IDRX
+                  </div>
+                )}
+                {/* Show peak balance info for completed campaigns */}
+                {(campaign.status === 1 || campaign.status === 2) && campaign.isPeakBalanceUpdated && (
+                  <div className="text-xs text-green-600 mt-1">
+                    📊 Peak balance tercatat: {formatNumber(campaign.peakBalance)} IDRX
                   </div>
                 )}
               </div>
@@ -559,6 +596,33 @@ export default function CampaignDetailPage() {
               {/* Owner Actions */}
               {isOwner && (
                 <div className="space-y-3">
+                  {/* Update Peak Balance Button - only show if external transfers exist */}
+                  {canUpdatePeakBalance && (
+                    <div className="bg-yellow-50 rounded-lg p-4 mb-3">
+                      <div className="text-sm text-yellow-800 font-medium mb-2">⚠️ Perlu Update Peak Balance</div>
+                      <div className="text-xs text-yellow-600 mb-3">
+                        Terdeteksi ada transfer langsung ke campaign ini. Sebelum withdraw, Anda harus mengupdate peak balance untuk mencatat total donasi tertinggi.
+                      </div>
+                      <button
+                        onClick={handleUpdatePeakBalance}
+                        disabled={isProcessing}
+                        className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-medium py-2 px-4 rounded-md disabled:opacity-50 transition-colors"
+                      >
+                        {isProcessing ? 'Processing...' : '📊 Update Peak Balance'}
+                      </button>
+                    </div>
+                  )}
+                  
+                  {/* Info for campaigns with only donate() transactions */}
+                  {isOwner && campaign?.timeRemaining === 0 && !hasExternalTransfers && !campaign?.isPeakBalanceUpdated && (
+                    <div className="bg-green-50 rounded-lg p-4 mb-3">
+                      <div className="text-sm text-green-800 font-medium mb-2">✅ Siap Withdraw</div>
+                      <div className="text-xs text-green-600">
+                        Semua donasi melalui sistem, tidak perlu update peak balance secara manual.
+                      </div>
+                    </div>
+                  )}
+                  
                   {canWithdraw && (
                     <button
                       onClick={handleWithdraw}
@@ -569,12 +633,27 @@ export default function CampaignDetailPage() {
                     </button>
                   )}
                   
-                  {!canWithdraw && campaign.status === 0 && (
+                  {!canWithdraw && !canUpdatePeakBalance && campaign.status === 0 && (
                     <div className="text-sm text-gray-600 text-center p-3 bg-gray-50 rounded-md">
                       {campaign.isOwnerVerified 
                         ? "Withdraw akan tersedia setelah campaign berakhir (target tidak harus tercapai karena Anda terverifikasi)"
                         : "Withdraw akan tersedia setelah campaign berakhir dan target tercapai"
                       }
+                    </div>
+                  )}
+                  
+                  {/* Show info when peak balance updated but can't withdraw yet */}
+                  {campaign.isPeakBalanceUpdated && !canWithdraw && (campaign.status === 1 || campaign.status === 2) && (
+                    <div className="bg-blue-50 rounded-lg p-4">
+                      <div className="text-sm text-blue-800 font-medium mb-2">✅ Peak Balance Updated</div>
+                      <div className="text-xs text-blue-600 mb-2">
+                        Peak balance: {formatNumber(campaign.peakBalance)} IDRX
+                      </div>
+                      {campaign.status === 2 && !campaign.isOwnerVerified && (
+                        <div className="text-xs text-blue-600">
+                          Withdraw tidak tersedia karena Anda tidak terverifikasi dan target tidak tercapai.
+                        </div>
+                      )}
                     </div>
                   )}
                   
