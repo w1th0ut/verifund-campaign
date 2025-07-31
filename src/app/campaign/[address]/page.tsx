@@ -8,6 +8,7 @@ import Image from 'next/image';
 import { web3Service } from '@/utils/web3';
 import { getMetadataFromIPFS, CampaignMetadata } from '@/utils/ipfs';
 import VerificationBadge from '@/components/VerificationBadge';
+import GuardianAnalysis from '@/components/GuardianAnalysis';
 import AllTransactionHistory from '@/components/AllTransactionHistory';
 import PaymentStatusChecker from '@/components/PaymentStatusChecker';
 
@@ -400,6 +401,11 @@ export default function CampaignDetailPage() {
                 )}
               </div>
             </div>
+
+            {/* Guardian Analysis Section */}
+            {metadata?.guardianAnalysis && (
+              <GuardianAnalysis analysis={metadata.guardianAnalysis} />
+            )}
 
             <div className="bg-white rounded-lg shadow-md p-6">
               <h2 className="text-xl font-semibold mb-4">Detail Kampanye</h2>

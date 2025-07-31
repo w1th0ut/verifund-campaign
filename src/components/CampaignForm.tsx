@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useAccount, useDisconnect } from 'wagmi';
 import { useConnectModal } from '@xellar/kit';
-import { uploadToIPFS, uploadImageToIPFS } from '@/utils/ipfs';
+import { uploadToIPFS, uploadImageToIPFS, GuardianAnalysisData } from '@/utils/ipfs';
 import { web3Service } from '@/utils/web3';
 
 interface CampaignFormData {
@@ -35,10 +35,34 @@ export default function CampaignForm() {
   });
   
   const [isLoading, setIsLoading] = useState(false);
+  const [isVerified, setIsVerified] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [guardianAnalysis, setGuardianAnalysis] = useState<GuardianAnalysisData | null>(null);
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+  const [finalAnalysis, setFinalAnalysis] = useState<GuardianAnalysisData | null>(null);
 
   useEffect(() => {
     setIsClient(true);
   }, []);
+
+  // Check verification status when wallet is connected
+  useEffect(() => {
+    const checkVerification = async () => {
+      if (isConnected && address) {
+        try {
+          const verified = await web3Service.checkVerificationStatus(address);
+          setIsVerified(verified);
+        } catch (error) {
+          console.error('Error checking verification status:', error);
+          setIsVerified(false);
+        }
+      } else {
+        setIsVerified(false);
+      }
+    };
+
+    checkVerification();
+  }, [isConnected, address]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -62,6 +86,42 @@ export default function CampaignForm() {
     open();
   };
 
+  // Function to analyze campaign with Verifund Guardian
+  const analyzeWithGuardian = async () => {
+    if (!formData.description.trim()) {
+      alert('Silakan isi deskripsi kampanye terlebih dahulu.');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    try {
+      const response = await fetch('/api/guardian', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ description: formData.description }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to analyze campaign');
+      }
+
+      const analysis = await response.json();
+      setGuardianAnalysis(analysis);
+      
+      if (isVerified) {
+        // For verified users, show analysis in modal for private review
+        setShowAnalysisModal(true);
+      }
+    } catch (error) {
+      console.error('Error analyzing campaign:', error);
+      alert('Gagal menganalisis kampanye. Silakan coba lagi.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -74,6 +134,23 @@ export default function CampaignForm() {
     setIsLoading(true);
 
     try {
+      // Run final AI analysis if not verified or if verified user hasn't analyzed yet
+      let analysisToSave = finalAnalysis;
+      if (!isVerified || !finalAnalysis) {
+        const response = await fetch('/api/guardian', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ description: formData.description }),
+        });
+
+        if (response.ok) {
+          analysisToSave = await response.json();
+          setFinalAnalysis(analysisToSave);
+        }
+      }
+
       let imageUrl = '';
       if (formData.image) {
         imageUrl = await uploadImageToIPFS(formData.image);
@@ -85,6 +162,8 @@ export default function CampaignForm() {
         category: formData.category,
         creatorName: formData.creatorName,
         image: imageUrl,
+        // Include Guardian analysis in metadata for public display
+        guardianAnalysis: analysisToSave || undefined,
       };
 
       const ipfsHash = await uploadToIPFS(metadata);
@@ -101,7 +180,7 @@ export default function CampaignForm() {
 
       alert(`Campaign created successfully! Transaction hash: ${txHash}`);
       
-      // Reset form
+      // Reset form and analysis states
       setFormData({
         creatorName: '',
         name: '',
@@ -111,6 +190,9 @@ export default function CampaignForm() {
         durationInMinutes: 60, // Reset to 1 hour
         image: null,
       });
+      setGuardianAnalysis(null);
+      setFinalAnalysis(null);
+      setShowAnalysisModal(false);
       
     } catch (error) {
       console.error('Error creating campaign:', error);
@@ -271,6 +353,55 @@ export default function CampaignForm() {
             placeholder="Ceritakan detail kampanye Anda..."
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
+          
+          {/* Verifund Guardian Analysis Button */}
+          {isConnected && (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={analyzeWithGuardian}
+                disabled={!isVerified || isAnalyzing || !formData.description.trim()}
+                className={`px-4 py-2 rounded-md font-medium transition-colors ${
+                  isVerified && formData.description.trim()
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                {isAnalyzing ? (
+                  <div className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Menganalisis...
+                  </div>
+                ) : (
+                  <>🛡️ Analisis dengan Guardian</>
+                )}
+              </button>
+              
+              {/* Status messages */}
+              {!isVerified && (
+                <p className="text-sm text-gray-500 mt-2">
+                  💡 Fitur analisis Guardian hanya tersedia untuk pengguna terverifikasi (pemegang SBT)
+                </p>
+              )}
+              
+              {isVerified && !formData.description.trim() && (
+                <p className="text-sm text-orange-600 mt-2">
+                  ⚠️ Isi deskripsi terlebih dahulu untuk menggunakan Guardian
+                </p>
+              )}
+              
+              {guardianAnalysis && !showAnalysisModal && (
+                <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-md">
+                  <p className="text-sm text-green-800">
+                    ✅ Analisis selesai! Hasil akan disertakan saat kampanye dipublikasikan.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div>
@@ -342,6 +473,93 @@ export default function CampaignForm() {
           </p>
         )}
       </form>
+      
+      {/* Guardian Analysis Modal */}
+      {showAnalysisModal && guardianAnalysis && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">🛡️ Analisis Verifund Guardian</h3>
+              <button
+                onClick={() => setShowAnalysisModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              {/* Credibility Score */}
+              <div className="p-4 bg-blue-50 rounded-lg">
+                <h4 className="font-semibold text-blue-800 mb-2">Skor Kredibilitas</h4>
+                <div className="flex items-center">
+                  <div className="w-full bg-blue-200 rounded-full h-3 mr-3">
+                    <div 
+                      className="bg-blue-600 h-3 rounded-full transition-all duration-300" 
+                      style={{ width: `${guardianAnalysis.credibilityScore}%` }}
+                    ></div>
+                  </div>
+                  <span className="font-bold text-blue-800">{guardianAnalysis.credibilityScore}/100</span>
+                </div>
+              </div>
+              
+              {/* Risk Level */}
+              <div className={`p-4 rounded-lg ${
+                guardianAnalysis.riskLevel === 'Rendah' ? 'bg-green-50' :
+                guardianAnalysis.riskLevel === 'Sedang' ? 'bg-yellow-50' :
+                'bg-red-50'
+              }`}>
+                <h4 className={`font-semibold mb-2 ${
+                  guardianAnalysis.riskLevel === 'Rendah' ? 'text-green-800' :
+                  guardianAnalysis.riskLevel === 'Sedang' ? 'text-yellow-800' :
+                  'text-red-800'
+                }`}>Tingkat Risiko</h4>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  guardianAnalysis.riskLevel === 'Rendah' ? 'bg-green-200 text-green-800' :
+                  guardianAnalysis.riskLevel === 'Sedang' ? 'bg-yellow-200 text-yellow-800' :
+                  'bg-red-200 text-red-800'
+                }`}>
+                  {guardianAnalysis.riskLevel}
+                </span>
+              </div>
+              
+              {/* Summary */}
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <h4 className="font-semibold text-gray-800 mb-2">Ringkasan Analisis</h4>
+                <p className="text-gray-700">{guardianAnalysis.summary}</p>
+              </div>
+              
+              {/* Suggestions */}
+              <div className="p-4 bg-purple-50 rounded-lg">
+                <h4 className="font-semibold text-purple-800 mb-2">Saran Perbaikan</h4>
+                <ul className="list-disc list-inside space-y-1">
+                  {guardianAnalysis.suggestions.map((suggestion, index) => (
+                    <li key={index} className="text-purple-700">{suggestion}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setFinalAnalysis(guardianAnalysis);
+                  setShowAnalysisModal(false);
+                }}
+                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-md font-medium transition-colors"
+              >
+                Gunakan Analisis Ini
+              </button>
+              <button
+                onClick={() => setShowAnalysisModal(false)}
+                className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 py-2 px-4 rounded-md font-medium transition-colors"
+              >
+                Analisis Ulang
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
