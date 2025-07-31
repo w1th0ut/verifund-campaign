@@ -134,9 +134,8 @@ export default function CampaignForm() {
     setIsLoading(true);
 
     try {
-      // Run final AI analysis if not verified or if verified user hasn't analyzed yet
       let analysisToSave = finalAnalysis;
-      if (!isVerified || !finalAnalysis) {
+      if (!finalAnalysis) {
         const response = await fetch('/api/guardian', {
           method: 'POST',
           headers: {
@@ -382,9 +381,14 @@ export default function CampaignForm() {
               
               {/* Status messages */}
               {!isVerified && (
-                <p className="text-sm text-gray-500 mt-2">
-                  💡 Fitur analisis Guardian hanya tersedia untuk pengguna terverifikasi (pemegang SBT)
-                </p>
+                <div className="mt-2 space-y-2">
+                  <p className="text-sm text-gray-500">
+                    💡 Fitur analisis preview hanya tersedia untuk pengguna terverifikasi (pemegang SBT)
+                  </p>
+                  <p className="text-sm text-blue-600">
+                    ℹ️ Tenang! Analisis AI Guardian akan tetap dilakukan otomatis saat Anda submit kampanye
+                  </p>
+                </div>
               )}
               
               {isVerified && !formData.description.trim() && (
